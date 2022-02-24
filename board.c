@@ -110,20 +110,30 @@ static struct State* add_result(struct State* s, uint8_t orig, uint8_t tgt) {
     return &s->succ[(s->nSucc)++];
 }
 
+static void move_piece(struct State* s, struct Move* m) {
+    m->pieceCaptured = 0;
+    m->valid = 0;
+
+    if (!is_on_board(m->dest)) {
+        return;
+    }
+    uint8_t piece = s->board[m->dest];
+    if (IS_VACANT(piece) || ((BLACK_TO_MOVE(s) && IS_WHITE(piece)) || (WHITE_TO_MOVE(s) && IS_BLACK(piece)))) {
+        // Move piece to either a vacant square or capture.
+        struct State* succ = add_result(s, m->orig, m->dest);
+        m->pieceCaptured = !IS_VACANT(s->board[m->dest]);
+        m->valid = 1;
+    }
+}
+
 static void slide_piece(struct State* s, uint8_t orig, int8_t dirn, uint8_t isKing) {
-    uint8_t tgt = orig;
+    uint8_t dest = orig;
     for(;;) {
-        tgt += dirn;
-        if (!is_on_board(tgt)) break;
-        uint8_t piece = s->board[tgt];
-        if (IS_VACANT(piece) || ((BLACK_TO_MOVE(s) && IS_WHITE(piece)) || (WHITE_TO_MOVE(s) && IS_BLACK(piece)))) {
-            // Move piece to either a vacant square or capture.
-            struct State* succ = add_result(s, orig, tgt);
-            uint8_t pieceCapture = !IS_VACANT(s->board[tgt]);
-            if (pieceCapture || isKing)
-                // The King is limited to one step anyway.
-                break;
-        } else {
+        dest += dirn;
+        struct Move m = {.orig = orig, .dest = dest};
+        move_piece(s, &m);
+        if (isKing || !m.valid || m.pieceCaptured) {
+            // The King is limited to one step anyway.
             break;
         }
     }

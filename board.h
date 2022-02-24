@@ -60,9 +60,9 @@ void from_0x88(uint8_t pos, uint8_t* rank, uint8_t* file);
 
 // Move notation (in 0x88 notation)
 struct Move {
-    uint8_t piece;
-    uint8_t start;
-    uint8_t finish;
+    uint8_t orig, dest;
+    uint8_t valid; // Either a piece was captured or the position is in bounds.
+    uint8_t pieceCaptured;
 };
 
 struct State {
