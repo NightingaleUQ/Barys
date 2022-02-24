@@ -53,14 +53,6 @@ void from_0x88(uint8_t pos, uint8_t* rank, uint8_t* file);
 #define DOWN_LEFT   (-0x11)
 #define DOWN_RIGHT  (-0x0F)
 
-static const int8_t moveDirns[8];
-#define ROOK_DIRN_START     0
-#define ROOK_DIRN_END       3
-#define BISHOP_DIRN_START   4
-#define BISHOP_DIRN_END     7
-#define ROYAL_DIRN_START    0
-#define ROYAL_DIRN_END      7
-
 // ===========================================================================
 // Game states
 // Two states are considered equal if (board) is equal and (ply) is both odd or both even
@@ -81,8 +73,10 @@ struct State {
     uint8_t ply;
     
     // NOT USED FOR STATE EQUALITY CHECKING
-    const struct State* lastState;
-    // struct State nextStates[50]; // TODO Dynamic array
+    struct Move lastMove;
+    const struct State* last;
+    struct State* succ; // Dynamic array
+    uint8_t cSucc, nSucc; // Array capacity and size
 };
 
 #define BLACK_TO_MOVE(s) ((s)->ply % 2)
@@ -94,7 +88,6 @@ void print_state(const struct State* s);
 // ===========================================================================
 // Legal moves
 // ===========================================================================
-// Returns the next state from a given position. Limited to size of results array, specified by n.
-uint8_t get_legal_moves(const struct State* s, struct State* results, uint8_t maxResults);
+void get_legal_moves(struct State* s);
 
 #endif // BOARD_H

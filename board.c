@@ -64,7 +64,10 @@ static const struct State initialState = {
         BLACK | ROOK, BLACK | KNIGHT, BLACK | BISHOP, BLACK | QUEEN, BLACK | KING, BLACK | BISHOP, BLACK | KNIGHT, BLACK | ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
     },
     .ply = 0,
-    .lastState = NULL
+    .last = NULL,
+    .succ = NULL,
+    .cSucc = 0,
+    .nSucc = 0
 };
 
 static const struct State whiteTest = {
@@ -79,89 +82,109 @@ static const struct State whiteTest = {
         BLACK | ROOK, BLACK | KNIGHT, BLACK | BISHOP, BLACK | QUEEN, BLACK | KING, BLACK | BISHOP, BLACK | KNIGHT, BLACK | ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
     },
     .ply = 0,
-    .lastState = NULL
+    .last = NULL,
+    .succ = NULL,
+    .cSucc = 0,
+    .nSucc = 0
 };
 
-static const int8_t moveDirns[8] = {LEFT, RIGHT, UP, DOWN, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT};
-
-// Returns non-zero pointer if successful
-static struct State* add_result(const struct State* s, struct State* results, uint8_t maxResults, uint8_t* nResults) {
-    if (*nResults < maxResults) {
-        memcpy(&results[*nResults], s, sizeof(struct State));
-        results[*nResults].ply++;
-        results[*nResults].lastState = s;
-        return &results[(*nResults)++];
-    } else {
-        return NULL;
+// Allocates memory for a successor state and pre-populates some fields.
+static struct State* add_result(struct State* s, uint8_t orig, uint8_t tgt) {
+    if (s->succ == NULL) {
+        s->succ = malloc(48 * sizeof(struct State));
+        s->cSucc = 48;
+    } else if (s->nSucc == s->cSucc) {
+        s->cSucc += 16;
+        s->succ = realloc(s->succ, s->cSucc);
     }
+
+    struct State* suc = &s->succ[s->nSucc];
+    memcpy(suc, s, sizeof(struct State));
+
+    // Record whether a piece has been moved before (for castling)
+    suc->board[tgt] = s->board[orig] | PIECE_MOVED;
+    suc->board[orig] = 0;
+
+    suc->ply++;
+    suc->last = s;
+    return &s->succ[(s->nSucc)++];
 }
 
-static void slide_piece(const struct State* s, struct State* results, uint8_t maxResults, uint8_t* nResults, uint8_t pos, int8_t dirn) {
-    // TODO King
-    uint8_t tgt = pos;
+static void slide_piece(struct State* s, uint8_t orig, int8_t dirn, uint8_t isKing) {
+    uint8_t tgt = orig;
     for(;;) {
         tgt += dirn;
         if (!is_on_board(tgt)) break;
         uint8_t piece = s->board[tgt];
         if (IS_VACANT(piece) || ((BLACK_TO_MOVE(s) && IS_WHITE(piece)) || (WHITE_TO_MOVE(s) && IS_BLACK(piece)))) {
             // Move piece to either a vacant square or capture.
-            // Record rook and king movement for castling
-            struct State* stateNext = add_result(s, results, maxResults, nResults);
-            if (!stateNext) return;
+            struct State* succ = add_result(s, orig, tgt);
             uint8_t pieceCapture = !IS_VACANT(s->board[tgt]);
-            stateNext->board[tgt] = s->board[pos] | PIECE_MOVED;
-            stateNext->board[pos] = 0;
-            if (pieceCapture) break;
+            if (pieceCapture || isKing)
+                // The King is limited to one step anyway.
+                break;
         } else {
             break;
         }
     }
 }
 
-uint8_t get_legal_moves(const struct State* s, struct State* results, uint8_t maxResults) {
-    uint8_t nResults = 0;
+static const int8_t slideDirns[8] = {LEFT, RIGHT, UP, DOWN, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT};
+static const int8_t knightDirns[8] = {UP+UP_LEFT, UP+UP_RIGHT, RIGHT+UP_RIGHT, RIGHT+DOWN_RIGHT, DOWN+DOWN_LEFT, DOWN+DOWN_RIGHT, LEFT+DOWN_LEFT, LEFT+UP_LEFT};
+
+void get_legal_moves(struct State* s) {
     struct State* stateNext;
     for (int8_t r = 0; r < 8; r++)
     for (int8_t f = 0; f < 8; f++) {
-        uint8_t pos = to_0x88(r, f);
+        uint8_t orig = to_0x88(r, f);
         // CHECK COLOUR
-        if ((BLACK_TO_MOVE(s) && IS_WHITE(s->board[pos])) || (WHITE_TO_MOVE(s) && IS_BLACK(s->board[pos]))) continue;
-        uint8_t piece = PIECE(s->board[pos]);
+        if ((BLACK_TO_MOVE(s) && IS_WHITE(s->board[orig])) || (WHITE_TO_MOVE(s) && IS_BLACK(s->board[orig]))) continue;
+        uint8_t piece = PIECE(s->board[orig]);
         // ROOK
         if (piece == ROOK) {
-            for (int8_t dirn = ROOK_DIRN_START; dirn <= ROOK_DIRN_END; dirn++) {
-                slide_piece(s, results, maxResults, &nResults, pos, moveDirns[dirn]);
+            for (int8_t dirn = 0; dirn <= 3; dirn++) {
+                slide_piece(s, orig, slideDirns[dirn], 0);
             }
         }
         // BISHOP
         if (piece == BISHOP) {
-            for (int8_t dirn = BISHOP_DIRN_START; dirn <= BISHOP_DIRN_END; dirn++) {
-                slide_piece(s, results, maxResults, &nResults, pos, moveDirns[dirn]);
+            for (int8_t dirn = 4; dirn <= 7; dirn++) {
+                slide_piece(s, orig, slideDirns[dirn], 0);
             }
         }
         // QUEEN
         if (piece == QUEEN) {
-            for (int8_t dirn = ROYAL_DIRN_START; dirn <= ROYAL_DIRN_END; dirn++) {
-                slide_piece(s, results, maxResults, &nResults, pos, moveDirns[dirn]);
+            for (int8_t dirn = 0; dirn <= 7; dirn++) {
+                slide_piece(s, orig, slideDirns[dirn], 0);
             }
         }
-        // TODO King, Knight, Pawn (two-step, promotion), En passant, Castling
+        // KING
+        if (piece == KING) {
+            for (int8_t dirn = 0; dirn <= 7; dirn++) {
+                slide_piece(s, orig, slideDirns[dirn], 1);
+            }
+        }
+        // KNIGHT
+        if (piece == KNIGHT) {
+            for (int8_t dirn = 0; dirn <= 7; dirn++) {
+                // Try each of the squares
+            }
+        }
+
+        // TODO Knight, Pawn (two-step, promotion), En passant, Castling
     }
     // TODO Remove entries that are in check
-    return nResults;
 }
 
 int main() {
-    print_state(&initialState);
-
-    /*
-    print_state(&whiteTest);
-    struct State* results = malloc(64 * sizeof(struct State));
-    uint8_t nResults = get_legal_moves(&whiteTest, results, 64);
-    for (uint8_t i = 0; i < nResults; i++) {
-        print_state(&results[i]);
+    struct State s0;
+    memcpy(&s0, &whiteTest, sizeof(struct State));
+    //memcpy(&s0, &initialState, sizeof(struct State));
+    print_state(&s0);
+    get_legal_moves(&s0);
+    for (uint8_t i = 0; i < s0.nSucc; i++) {
+        print_state(&s0.succ[i]);
     }
-    printf("%u Legal moves\n", nResults);
-    */
+    printf("%u Legal moves\n", s0.nSucc);
     return 0;
 }
