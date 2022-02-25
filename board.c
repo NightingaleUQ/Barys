@@ -1,10 +1,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <unistd.h>
 #include "board.h"
 
+// Enumeration of pieces
+static const char pieceSyms[7] = {' ', 'p', 'R', 'N', 'B', 'Q', 'K'};
+
+void print_move(const struct Move* m) {
+    if (m == NULL || !PIECE(m->piece)) {
+        printf("No previous move");
+    } else {
+        printf("%c", pieceSyms[PIECE(m->piece)]);
+        uint8_t coord[2];
+        from_0x88_to_coord(m->orig, coord);
+        printf("%c%c", coord[0], coord[1]);
+        from_0x88_to_coord(m->dest, coord);
+        printf("%c%c", coord[0], coord[1]);
+    }
+}
+
 void print_state(const struct State* s) {
+    print_move(&s->lastMove);
+    if (BLACK_TO_MOVE(s))
+        printf(", black to move\n");
+    else
+        printf(", white to move\n");
+
+    printf("   ");
+    for (char f = 'a'; f <= 'h'; f++) {
+        printf(" %c ", f);
+    }
+    printf("\n");
+
     for (int8_t r = 7; r >= 0; r--) {
+        printf(" %d ", r + 1);
         for (int8_t f = 0; f <= 7; f++) {
             // Whether the square is white
             uint8_t white_square = 0;
@@ -21,15 +52,8 @@ void print_state(const struct State* s) {
             else
                 printf("\033[39m");
             // Print out the piece
-            switch (PIECE(sq)) {
-                case PAWN:  printf("p"); break;
-                case ROOK:  printf("R"); break;
-                case KNIGHT:printf("N"); break;
-                case BISHOP:printf("B"); break;
-                case QUEEN: printf("Q"); break;
-                case KING:  printf("K"); break;
-                case NO_PIECE: printf(" "); break;
-            }
+            char sym = pieceSyms[PIECE(sq)];
+            printf("%c", sym);
             printf(" ");
             printf("\033[39m");
         }
@@ -50,6 +74,23 @@ uint8_t to_0x88(uint8_t rank, uint8_t file) {
 void from_0x88(uint8_t pos, uint8_t* rank, uint8_t* file) {
     *rank = (pos >> 4);
     *file = (pos & 0x07);
+}
+
+uint8_t coord_to_0x88(char coord[2]) {
+    uint8_t f = tolower(coord[0]) - 'a' + 1;
+    uint8_t r = coord[1] - '1';
+    if (r < '1' || r > '7') return 0xFF;
+    if (f < 'a' || f > 'h') return 0xFF;
+    return to_0x88(r, f);
+}
+
+uint8_t from_0x88_to_coord(uint8_t pos, char coord[2]) {
+    uint8_t r, f;
+    if (!is_on_board(pos)) return 0xFF;
+    from_0x88(pos, &r, &f);
+    coord[0] = f + 'a';
+    coord[1] = r + '1';
+    return 1;
 }
 
 static const struct State initialState = {
@@ -102,19 +143,10 @@ static struct State* add_result(struct State* s, struct Move* m) {
     struct State* suc = &s->succ[s->nSucc];
     memcpy(suc, s, sizeof(struct State));
 
-    // Move piece
-    // Also record whether a piece has been moved before (for castling)
-    suc->board[m->dest] = s->board[m->orig] | PIECE_MOVED;
-    suc->board[m->orig] = 0;
-
-    // Update move number and information on last move
-    suc->ply++;
-    suc->last = s;
-    memcpy(&suc->lastMove, m, sizeof(struct Move));
     return &s->succ[(s->nSucc)++];
 }
 
-// Adds states to successor if the piece can move there.
+// Adds states to successor if the piece can move according to m.
 static struct State* move_piece(struct State* s, struct Move* m) {
     m->pieceCaptured = 0;
     m->valid = 0;
@@ -124,11 +156,27 @@ static struct State* move_piece(struct State* s, struct Move* m) {
     }
     uint8_t tgt = s->board[m->dest];
     if (IS_VACANT(tgt) || ((BLACK_TO_MOVE(s) && IS_WHITE(tgt)) || (WHITE_TO_MOVE(s) && IS_BLACK(tgt)))) {
+        // Get struct for new state.
+        struct State* suc = add_result(s, m);
+
         // Move piece to either a vacant square or capture.
-        struct State* succ = add_result(s, m);
+        // Also record whether a piece has been moved before (for castling)
+        suc->board[m->dest] = s->board[m->orig] | PIECE_MOVED;
+        suc->board[m->orig] = 0;
+
+        // Update move number and information on last move
+        suc->ply++;
+        suc->last = s;
+        suc->succ = NULL;
+        suc->cSucc = 0;
+        suc->nSucc = 0;
+
+        m->piece = PIECE(s->board[m->orig]);
         m->pieceCaptured = !IS_VACANT(s->board[m->dest]);
         m->valid = 1;
-        return succ;
+        memcpy(&suc->lastMove, m, sizeof(struct Move));
+
+        return suc;
     }
     return NULL;
 }
@@ -158,6 +206,11 @@ static void check_promotion(struct State* s, const struct Move *m) {
     }
 }
 
+// Return whether this successor state leaves the King in check.
+static uint8_t is_in_check(const struct State* s) {
+
+}
+
 // Rook: 0-3, Bishop: 4-7, Queen and King: 0-7;
 static const int8_t slideDirns[8] = {LEFT, RIGHT, UP, DOWN, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT};
 static const int8_t knightDirns[8] = {UP+UP_LEFT, UP+UP_RIGHT, RIGHT+UP_RIGHT, RIGHT+DOWN_RIGHT, DOWN+DOWN_LEFT, DOWN+DOWN_RIGHT, LEFT+DOWN_LEFT, LEFT+UP_LEFT};
@@ -165,7 +218,8 @@ static const int8_t knightDirns[8] = {UP+UP_LEFT, UP+UP_RIGHT, RIGHT+UP_RIGHT, R
 static const int8_t pawnDirnsBlack[6] = {DOWN, DOWN+DOWN, DOWN_LEFT, DOWN_RIGHT, LEFT, RIGHT};
 static const int8_t pawnDirnsWhite[6] = {UP, UP+UP, UP_LEFT, UP_RIGHT, LEFT, RIGHT};
 
-void get_legal_moves(struct State* s) {
+static void _get_moves(struct State* s) {
+    if (s->movesExpanded) return;
     struct State* succ;
     for (int8_t r = 0; r < 8; r++)
     for (int8_t f = 0; f < 8; f++) {
@@ -250,8 +304,8 @@ void get_legal_moves(struct State* s) {
                 // En passant: Check rank and pieces beside and clear destination.
                 // m.dest is the same value used for normal capture above.
                 uint8_t adjacent = s->board[orig + pawnDirns[i + 2]];
-                if ((BLACK_TO_MOVE(s) && r == 3 && IS_VACANT(tgt) && IS_WHITE(adjacent) && PIECE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent)) ||
-                        (WHITE_TO_MOVE(s) && r == 4 && IS_VACANT(tgt) && IS_BLACK(adjacent) && PIECE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent))) {
+                if ((BLACK_TO_MOVE(s) && r == 3) || (WHITE_TO_MOVE(s) && r == 4))
+                if (IS_VACANT(tgt) && IS_WHITE(adjacent) && PIECE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent)) {
                     succ = move_piece(s, &m);
                     // Additionally, remove en passant-ed piece
                     if (succ != NULL)
@@ -260,10 +314,42 @@ void get_legal_moves(struct State* s) {
             }
         }
     }
-    // TODO Remove entries that are in check
+    s->movesExpanded = 1;
+}
+
+static uint8_t _is_game_over(const struct State* s) {
+    for (uint8_t i = 0; i < 128; i++) {
+        if ((WHITE_TO_MOVE(s) && IS_WHITE(s->board[i])) || (BLACK_TO_MOVE(s) && IS_BLACK(s->board[i])))
+        if (PIECE(s->board[i]) == KING) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void _remove_check(struct State* s) {
+    if (s->checksRemoved) return;
+    if (s->succ == NULL) return;
+    for (uint8_t i = 0; i < s->nSucc; i++) {
+        _get_moves(&s->succ[i]);
+        for (uint8_t j = 0; j < s->succ[i].nSucc; j++) {
+            if (_is_game_over(&s->succ[i].succ[j])) {
+                // Take element from end of array and replace here.
+                memcpy(&s->succ[i], &s->succ[s->nSucc - 1], sizeof(struct State));
+                s->nSucc--;
+            }
+        }
+    }
+    s->checksRemoved = 1;
+}
+
+void get_legal_moves(struct State* s) {
+    _get_moves(s);
+    _remove_check(s);
 }
 
 int main() {
+    /*
     struct State s0;
     memcpy(&s0, &whiteTest, sizeof(struct State));
     //memcpy(&s0, &initialState, sizeof(struct State));
@@ -273,5 +359,41 @@ int main() {
         print_state(&s0.succ[i]);
     }
     printf("%u Legal moves\n", s0.nSucc);
+    */
+
+    struct State s;
+    memcpy(&s, &initialState, sizeof(struct State));
+    // Prompt loop
+    for (;;) {
+        print_state(&s);
+
+        // Stalemate? Checkmate?
+        get_legal_moves(&s);
+        if (s.nSucc == 0) {
+            // TODO
+            printf("CHECKMATE / STALEMATE\n");
+            break;
+        }
+        
+        // Print legal moves
+        for (uint8_t i = 0; i < s.nSucc; i++) {
+            print_move(&s.succ[i].lastMove);
+            printf("     ");
+            if (((i + 1) % 6) == 0) {
+                printf("\n");
+            }
+        }
+
+        char buf[80];
+        printf("\nPlease enter a move, or type a time in seconds to search...");
+        fflush(stdout);
+        read(0, buf, 80);
+
+        // Makes a move
+        // Check that the move is legal, the execute it
+        
+
+        // Fork process and perform MCTS
+    }
     return 0;
 }

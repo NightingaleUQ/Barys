@@ -43,6 +43,11 @@ uint8_t is_on_board(uint8_t pos);
 uint8_t to_0x88(uint8_t rank, uint8_t file);
 void from_0x88(uint8_t pos, uint8_t* rank, uint8_t* file);
 
+// Coordinate conversion between 0x88 and algebraic coordinates.
+// Returns 0xFF if invalid.
+uint8_t coord_to_0x88(char coord[2]);
+uint8_t from_0x88_to_coord(uint8_t pos, char coord[2]);
+
 // Position relationships
 #define LEFT        (-0x01)
 #define RIGHT       (+0x01)
@@ -61,6 +66,7 @@ void from_0x88(uint8_t pos, uint8_t* rank, uint8_t* file);
 // Move notation (in 0x88 notation)
 struct Move {
     uint8_t orig, dest;
+    uint8_t piece; // Piece that was moved, only bottom three bits.
     uint8_t valid; // Either a piece was captured or the position is in bounds.
     uint8_t pieceCaptured;
 };
@@ -77,12 +83,13 @@ struct State {
     const struct State* last;
     struct State* succ; // Dynamic array
     uint8_t cSucc, nSucc; // Array capacity and size
+    uint8_t movesExpanded, checksRemoved;
 };
 
 #define BLACK_TO_MOVE(s) ((s)->ply % 2)
 #define WHITE_TO_MOVE(s) (!BLACK_TO_MOVE((s)))
 
-// Returns 0 if the state in invalid.
+void print_move(const struct Move* m);
 void print_state(const struct State* s);
 
 // ===========================================================================
