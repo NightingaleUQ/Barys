@@ -78,12 +78,15 @@ struct State {
     // Even means white to move, Odd means black to move.
     uint8_t ply;
     
-    // NOT USED FOR STATE EQUALITY CHECKING
+    // Previous and next states
     struct Move lastMove;
     const struct State* last;
     struct State* succ; // Dynamic array
     uint8_t cSucc, nSucc; // Array capacity and size
     uint8_t movesExpanded, checksRemoved;
+
+    // For MCTS
+    uint64_t wins, losses;
 };
 
 #define BLACK_TO_MOVE(s) ((s)->ply % 2)

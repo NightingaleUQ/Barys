@@ -3,26 +3,31 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <err.h>
 #include "board.h"
 
 // Enumeration of pieces
 static const char pieceSyms[7] = {' ', 'p', 'R', 'N', 'B', 'Q', 'K'};
 
-void print_move(const struct Move* m) {
+// Returns result in algebra as five characters + \0
+static void move_to_algebra(const struct Move* m, char algebra[6]) {
     if (m == NULL || !PIECE(m->piece)) {
-        printf("No previous move");
+        snprintf(algebra, 6, "none");
     } else {
-        printf("%c", pieceSyms[PIECE(m->piece)]);
-        uint8_t coord[2];
-        from_0x88_to_coord(m->orig, coord);
-        printf("%c%c", coord[0], coord[1]);
-        from_0x88_to_coord(m->dest, coord);
-        printf("%c%c", coord[0], coord[1]);
+        algebra[0] = pieceSyms[PIECE(m->piece)];
+        from_0x88_to_coord(m->orig, algebra + 1);
+        from_0x88_to_coord(m->dest, algebra + 3);
+        algebra[5] = 0;
     }
 }
 
 void print_state(const struct State* s) {
-    print_move(&s->lastMove);
+    char alge[6];
+    move_to_algebra(&s->lastMove, alge);
+    printf("%s", alge);
     if (BLACK_TO_MOVE(s))
         printf(", black to move\n");
     else
@@ -165,16 +170,18 @@ static struct State* move_piece(struct State* s, struct Move* m) {
         suc->board[m->orig] = 0;
 
         // Update move number and information on last move
+        m->piece = PIECE(s->board[m->orig]);
+        m->pieceCaptured = !IS_VACANT(s->board[m->dest]);
+        m->valid = 1;
+        memcpy(&suc->lastMove, m, sizeof(struct Move));
+
         suc->ply++;
         suc->last = s;
         suc->succ = NULL;
         suc->cSucc = 0;
         suc->nSucc = 0;
-
-        m->piece = PIECE(s->board[m->orig]);
-        m->pieceCaptured = !IS_VACANT(s->board[m->dest]);
-        m->valid = 1;
-        memcpy(&suc->lastMove, m, sizeof(struct Move));
+        suc->movesExpanded = 0;
+        suc->checksRemoved = 0;
 
         return suc;
     }
@@ -317,10 +324,10 @@ static void _get_moves(struct State* s) {
     s->movesExpanded = 1;
 }
 
-static uint8_t _is_game_over(const struct State* s) {
+static uint8_t _king_captured(const struct State* s) {
     for (uint8_t i = 0; i < 128; i++) {
-        if ((WHITE_TO_MOVE(s) && IS_WHITE(s->board[i])) || (BLACK_TO_MOVE(s) && IS_BLACK(s->board[i])))
-        if (PIECE(s->board[i]) == KING) {
+        if (PIECE(s->board[i]) == KING)
+        if ((WHITE_TO_MOVE(s) && IS_WHITE(s->board[i])) || (BLACK_TO_MOVE(s) && IS_BLACK(s->board[i]))) {
             return 0;
         }
     }
@@ -328,16 +335,23 @@ static uint8_t _is_game_over(const struct State* s) {
 }
 
 static void _remove_check(struct State* s) {
-    if (s->checksRemoved) return;
+    //if (s->checksRemoved) return; FIXME
     if (s->succ == NULL) return;
-    for (uint8_t i = 0; i < s->nSucc; i++) {
+    for (int8_t i = 0; i < s->nSucc; i++) {
         _get_moves(&s->succ[i]);
+        uint8_t game_over = 0;
         for (uint8_t j = 0; j < s->succ[i].nSucc; j++) {
-            if (_is_game_over(&s->succ[i].succ[j])) {
-                // Take element from end of array and replace here.
-                memcpy(&s->succ[i], &s->succ[s->nSucc - 1], sizeof(struct State));
-                s->nSucc--;
+            // See if for s' there exists a s'' that has the King captured
+            if (_king_captured(&s->succ[i].succ[j])) {
+                game_over = 1;
+                break;
             }
+        }
+        if (game_over) {
+            // Take element from end of array and replace here.
+            memcpy(&s->succ[i], &s->succ[s->nSucc - 1], sizeof(struct State));
+            s->nSucc--;
+            i--; // This replacing element needs to be checked again
         }
     }
     s->checksRemoved = 1;
@@ -363,6 +377,8 @@ int main() {
 
     struct State s;
     memcpy(&s, &initialState, sizeof(struct State));
+    char gamefn[80];
+    int gamef;
     // Prompt loop
     for (;;) {
         print_state(&s);
@@ -377,23 +393,51 @@ int main() {
         
         // Print legal moves
         for (uint8_t i = 0; i < s.nSucc; i++) {
-            print_move(&s.succ[i].lastMove);
+            char alge[6];
+            move_to_algebra(&s.succ[i].lastMove, alge);
+            printf("%s", alge);
             printf("     ");
             if (((i + 1) % 6) == 0) {
                 printf("\n");
             }
         }
 
+        // Load state
+        // Remember to clear references to successor states
+
+        // Fork process and perform MCTS
+
         char buf[80];
-        printf("\nPlease enter a move, or type a time in seconds to search...");
+        bzero(buf, 80);
+        printf("\nPlease enter a move, or type a time in seconds to search $ ");
         fflush(stdout);
-        read(0, buf, 80);
+        fgets (buf, 80, stdin);
+        size_t z = strnlen(buf, 80);
+        if (z == 0) break; // End of input
+        buf[z - 1] = 0; // Strip trailing newline
 
         // Makes a move
         // Check that the move is legal, the execute it
-        
+        for (uint8_t i = 0; i < s.nSucc; i++) {
+            char alge[6];
+            move_to_algebra(&s.succ[i].lastMove, alge);
+            if (strncmp(buf, alge, 6) == 0) {
+                // Overwrite current state
+                memcpy(&s, &s.succ[i], sizeof(struct State));
+                // Save new state to disk
+                mkdir("history", 0777);
+                snprintf(gamefn, 80, "history/move%d.game", s.ply);
+                gamef = open(gamefn, O_CREAT | O_WRONLY, 0666);
+                if (gamef < 0)
+                    warn("open(): Error saving board");
+                if (write(gamef, &s, sizeof(struct State)) < 0)
+                    warn("write(): Error saving board");
+                close(gamef);
+                break;
+            }
+        }
 
-        // Fork process and perform MCTS
+        printf("\n");
     }
     return 0;
 }
