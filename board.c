@@ -116,24 +116,6 @@ static const struct State initialState = {
     .nSucc = 0
 };
 
-static const struct State whiteTest = {
-    .board = {
-        WHITE|ROOK, WHITE|KNIGHT, WHITE|BISHOP, WHITE|QUEEN, WHITE|KING, WHITE|BISHOP, WHITE|KNIGHT, WHITE|ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE,  0, 0, 0, 0, 0, 0, 0, 0,
-        NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE,  0, 0, 0, 0, 0, 0, 0, 0,
-        NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE,  0, 0, 0, 0, 0, 0, 0, 0,
-        NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE,  0, 0, 0, 0, 0, 0, 0, 0,
-        BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN,  0, 0, 0, 0, 0, 0, 0, 0,
-        BLACK|ROOK, BLACK|KNIGHT, BLACK|BISHOP, BLACK|QUEEN, BLACK|KING, BLACK|BISHOP, BLACK|KNIGHT, BLACK|ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
-    },
-    .ply = 0,
-    .last = NULL,
-    .succ = NULL,
-    .cSucc = 0,
-    .nSucc = 0
-};
-
 // Allocates memory for a successor state and pre-populates some fields.
 static struct State* add_result(struct State* s, struct Move* m) {
     if (s->succ == NULL) {
@@ -211,11 +193,6 @@ static void check_promotion(struct State* s, const struct Move *m) {
         s->board[m->dest] &= PIECE(0xFF);
         s->board[m->dest] |= QUEEN;
     }
-}
-
-// Return whether this successor state leaves the King in check.
-static uint8_t is_in_check(const struct State* s) {
-
 }
 
 // Rook: 0-3, Bishop: 4-7, Queen and King: 0-7;
@@ -311,12 +288,12 @@ static void _get_moves(struct State* s) {
                 // En passant: Check rank and pieces beside and clear destination.
                 // m.dest is the same value used for normal capture above.
                 uint8_t adjacent = s->board[orig + pawnDirns[i + 2]];
-                if ((BLACK_TO_MOVE(s) && r == 3) || (WHITE_TO_MOVE(s) && r == 4))
-                if (IS_VACANT(tgt) && IS_WHITE(adjacent) && PIECE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent)) {
+                if ((BLACK_TO_MOVE(s) && r == 3 && IS_WHITE(adjacent)) || (WHITE_TO_MOVE(s) && r == 4 && IS_BLACK(adjacent)))
+                if (IS_VACANT(tgt) && PIECE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent)) {
                     succ = move_piece(s, &m);
                     // Additionally, remove en passant-ed piece
                     if (succ != NULL)
-                        succ->board[adjacent] = NO_PIECE;
+                        succ->board[orig + pawnDirns[i + 2]] = 0;
                 }
             }
         }
@@ -334,20 +311,23 @@ static uint8_t _king_captured(const struct State* s) {
     return 1;
 }
 
+// Return whether this successor state leaves the King in check.
+static uint8_t _is_in_check(struct State* su) {
+    _get_moves(su);
+    for (uint8_t i = 0; i < su->nSucc; i++) {
+        // See if for s' there exists a s'' that has the King captured
+        if (_king_captured(&su->succ[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void _remove_check(struct State* s) {
-    //if (s->checksRemoved) return; FIXME
+    if (s->checksRemoved) return;
     if (s->succ == NULL) return;
     for (int8_t i = 0; i < s->nSucc; i++) {
-        _get_moves(&s->succ[i]);
-        uint8_t game_over = 0;
-        for (uint8_t j = 0; j < s->succ[i].nSucc; j++) {
-            // See if for s' there exists a s'' that has the King captured
-            if (_king_captured(&s->succ[i].succ[j])) {
-                game_over = 1;
-                break;
-            }
-        }
-        if (game_over) {
+        if (_is_in_check(&s->succ[i])) {
             // Take element from end of array and replace here.
             memcpy(&s->succ[i], &s->succ[s->nSucc - 1], sizeof(struct State));
             s->nSucc--;
@@ -363,18 +343,6 @@ void get_legal_moves(struct State* s) {
 }
 
 int main() {
-    /*
-    struct State s0;
-    memcpy(&s0, &whiteTest, sizeof(struct State));
-    //memcpy(&s0, &initialState, sizeof(struct State));
-    print_state(&s0);
-    get_legal_moves(&s0);
-    for (uint8_t i = 0; i < s0.nSucc; i++) {
-        print_state(&s0.succ[i]);
-    }
-    printf("%u Legal moves\n", s0.nSucc);
-    */
-
     struct State s;
     memcpy(&s, &initialState, sizeof(struct State));
     char gamefn[80];
@@ -402,11 +370,7 @@ int main() {
             }
         }
 
-        // Load state
-        // Remember to clear references to successor states
-
-        // Fork process and perform MCTS
-
+        uint8_t cmdValid = 0;
         char buf[80];
         bzero(buf, 80);
         printf("\nPlease enter a move, or type a time in seconds to search $ ");
@@ -433,9 +397,18 @@ int main() {
                 if (write(gamef, &s, sizeof(struct State)) < 0)
                     warn("write(): Error saving board");
                 close(gamef);
+                cmdValid = 1;
                 break;
             }
         }
+
+        // Load state
+        // Remember to clear references to successor states
+
+        // Fork process and perform MCTS
+
+        if (!cmdValid)
+            printf("Invalid command, try again.");
 
         printf("\n");
     }
