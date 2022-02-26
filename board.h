@@ -6,16 +6,16 @@
 // ===========================================================================
 // Piece Representation
 // ===========================================================================
-// Bits 0-2: Pieces
-#define PIECE(x) ((x) & 0x07)
-#define NO_PIECE (0)
+// Bits 0-2: Roles
+#define ROLE(x) ((x) & 0x07)
+#define NO_ROLE (0)
 #define PAWN (1)
 #define ROOK (2)
 #define KNIGHT (3)
 #define BISHOP (4)
 #define QUEEN (5)
 #define KING (6)
-#define IS_VACANT(x) (!PIECE((x)))
+#define IS_VACANT(x) (!ROLE((x)))
 
 // Bits 3-4: Unused
 
@@ -66,7 +66,7 @@ uint8_t from_0x88_to_coord(uint8_t pos, char coord[2]);
 // Move notation (in 0x88 notation)
 struct Move {
     uint8_t orig, dest;
-    uint8_t piece; // Piece that was moved, only bottom three bits.
+    uint8_t role; // Piece that was moved, only bottom three bits for the role.
     uint8_t valid; // Either a piece was captured or the position is in bounds.
     uint8_t pieceCaptured;
 };
@@ -85,8 +85,8 @@ struct State {
     uint8_t cSucc, nSucc; // Array capacity and size
     uint8_t movesExpanded, checksRemoved;
 
-    // For MCTS
-    uint64_t wins, losses;
+    // For MCTS: Number of times each side won
+    uint64_t winsB, winsW;
 };
 
 #define BLACK_TO_MOVE(s) ((s)->ply % 2)
@@ -98,6 +98,8 @@ void print_state(const struct State* s);
 // ===========================================================================
 // Legal moves
 // ===========================================================================
+// Populates s->succ with successor states as a result of legal moves.
+// Turn off recursion when querying for check.
 void get_legal_moves(struct State* s);
 
 #endif // BOARD_H
