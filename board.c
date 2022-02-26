@@ -214,8 +214,12 @@ static void check_promotion(struct State* s, const struct Move *m) {
 }
 
 // TODO Make this recursive
-static void clean_up_successors(struct State* s) {
+static void clean_up_successors(struct State* s, const struct State* dontfree) {
     if (s->succ) {
+        for (uint8_t i = 0; i < s->nSucc; i++) {
+            if (&s->succ[i] != dontfree)
+                clean_up_successors(&s->succ[i], dontfree);
+        }
         free(s->succ);
         s->succ = NULL;
         s->cSucc = 0;
@@ -229,7 +233,7 @@ static void get_moves(struct State* s, uint8_t recurse) {
         return;
     } else {
         // Clear successors and search again later
-        clean_up_successors(s);
+        clean_up_successors(s, NULL);
     }
     struct State* succ;
     for (int8_t r = 0; r < 8; r++)
@@ -358,14 +362,16 @@ static uint8_t king_captured(const struct State* s) {
 // Return whether this successor state (su, opponent to move) leaves the King in check.
 // That is, whether the opponent has a move that can capture the King.
 static uint8_t is_in_check_su(struct State* su) {
+    uint8_t result = 0;
     get_moves(su, 0);
     for (uint8_t i = 0; i < su->nSucc; i++) {
         // See if for s' there exists a s'' that has the King captured
         if (king_captured(&su->succ[i])) {
-            return 1;
+            result = 1;
         }
     }
-    return 0;
+    clean_up_successors(su, NULL);
+    return result;
 }
 
 // Return whether the player to move is in check
@@ -380,8 +386,6 @@ static uint8_t is_in_check(const struct State* s) {
     su.movesExpanded = 0;
     su.checksRemoved = 0;
     su.ply++;
-
-    // TODO Clean up memory
 
     return is_in_check_su(&su);
 }
@@ -414,7 +418,7 @@ static void save_game(const struct State* s) {
     gamef = open(gamefn, O_CREAT | O_WRONLY, 0666);
     if (gamef < 0)
         warn("open(): Error saving board");
-    if (write(gamef, &s, sizeof(struct State)) < 0)
+    if (write(gamef, s, sizeof(struct State)) < 0)
         warn("write(): Error saving board");
     close(gamef);
 }
@@ -471,7 +475,11 @@ int main() {
             move_to_algebra(&s.succ[i].lastMove, alge);
             if (strncasecmp(buf, alge, 6) == 0) {
                 // Overwrite current state and save it.
-                memcpy(&s, &s.succ[i], sizeof(struct State));
+                struct State succ;
+                memcpy(&succ, &s.succ[i], sizeof(struct State));
+                clean_up_successors(&s, &s.succ[i]);
+                memcpy(&s, &succ, sizeof(struct State));
+
                 save_game(&s);
                 cmdValid = 1;
                 break;
@@ -488,5 +496,7 @@ int main() {
 
         printf("\n");
     }
+    clean_up_successors(&s, NULL);
+
     return 0;
 }
