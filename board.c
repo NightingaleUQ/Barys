@@ -21,9 +21,9 @@ static const int8_t knightDirns[8] = {UP+UP_LEFT, UP+UP_RIGHT, RIGHT+UP_RIGHT, R
 // PAWN: Forward: 0, Two-step: 1, Capture: 2-3, En passant: 4-5 (corresponding to 2-3, respectively)
 static const int8_t pawnDirnsBlack[6] = {DOWN, DOWN+DOWN, DOWN_LEFT, DOWN_RIGHT, LEFT, RIGHT};
 static const int8_t pawnDirnsWhite[6] = {UP, UP+UP, UP_LEFT, UP_RIGHT, LEFT, RIGHT};
-// CASTLING: Relative Rook positons: 0-1, Rook targets: 2-3, King targets: 4-5
+// CASTLING: Relative Rook positons: 0-1, Rook targets / Direction of King movement: 2-3, King targets: 4-5
 // In each pair, the Queenside is listed first.
-static const int8_t castlingSquares[] = {4*LEFT, 3*RIGHT, LEFT, RIGHT, 2*LEFT, 2*RIGHT};
+static const int8_t castlingSquares[6] = {4*LEFT, 3*RIGHT, LEFT, RIGHT, 2*LEFT, 2*RIGHT};
 
 static const struct State initialState = {
     .board = {
@@ -53,10 +53,17 @@ static void move_to_algebra(const struct Move* m, char algebra[6]) {
     if (m == NULL || !(m->role)) {
         snprintf(algebra, 6, "none");
     } else {
-        algebra[0] = roleSyms[m->role];
-        from_0x88_to_coord(m->orig, algebra + 1);
-        from_0x88_to_coord(m->dest, algebra + 3);
-        algebra[5] = 0;
+        uint8_t i = 0;
+        char role = roleSyms[m->role];
+        if (role != 'p') {
+            algebra[i] = role;
+            i++;
+        }
+        from_0x88_to_coord(m->orig, algebra + i);
+        i += 2;
+        from_0x88_to_coord(m->dest, algebra + i);
+        i += 2;
+        algebra[i] = 0;
     }
 }
 
@@ -85,7 +92,6 @@ void print_state(const struct State* s) {
                 printf("\033[107m");
             else
                 printf("\033[40m");
-            printf(" ");
             uint8_t sq = s->board[to_0x88(r, f)];
             // Determine the piece's colour
             if (IS_BLACK(sq))
@@ -94,8 +100,7 @@ void print_state(const struct State* s) {
                 printf("\033[39m");
             // Print out the piece
             char sym = roleSyms[ROLE(sq)];
-            printf("%c", sym);
-            printf(" ");
+            printf(" %c ", sym);
             printf("\033[39m");
         }
         printf("\033[40m");
@@ -213,7 +218,7 @@ static void check_promotion(struct State* s, const struct Move *m) {
     }
 }
 
-// TODO Make this recursive
+// Recursively cleans up successor states, ignoring the state dontfree (if not NULL)
 static void clean_up_successors(struct State* s, const struct State* dontfree) {
     if (s->succ) {
         for (uint8_t i = 0; i < s->nSucc; i++) {
@@ -224,6 +229,7 @@ static void clean_up_successors(struct State* s, const struct State* dontfree) {
         s->succ = NULL;
         s->cSucc = 0;
         s->nSucc = 0;
+        s->movesExpanded = 0;
         s->checksRemoved = 0;
     }
 }
@@ -239,7 +245,7 @@ static void get_moves(struct State* s, uint8_t recurse) {
     for (int8_t r = 0; r < 8; r++)
     for (int8_t f = 0; f < 8; f++) {
         uint8_t orig = to_0x88(r, f);
-        // CHECK COLOUR and then extract only piece type.
+        // CHECK COLOUR
         uint8_t piece = s->board[orig];
         if ((BLACK_TO_MOVE(s) && IS_WHITE(piece)) || (WHITE_TO_MOVE(s) && IS_BLACK(piece))) continue;
 
@@ -266,7 +272,7 @@ static void get_moves(struct State* s, uint8_t recurse) {
             for (int8_t dirn = 0; dirn <= 7; dirn++) {
                 slide_piece(s, orig, slideDirns[dirn], 1);
             }
-            // Castling TODO
+            // Castling
             // Ensure King has not moved and not in check, then check each side
             if (recurse) {
                 if(!IS_PIECE_MOVED(piece) && !is_in_check(s))
@@ -274,9 +280,32 @@ static void get_moves(struct State* s, uint8_t recurse) {
                     uint8_t cornerPiece = s->board[orig + castlingSquares[0]];
                     if ((BLACK_TO_MOVE(s) && IS_BLACK(cornerPiece)) || (WHITE_TO_MOVE(s) && IS_WHITE(cornerPiece)))
                     if ((ROLE(cornerPiece) == ROOK) && !IS_PIECE_MOVED(cornerPiece)) {
-                        // There are no pieces in between TODO
-                        // The King does not pass through a square that is in check
-                        //
+                        // There are no pieces in between. Check squares starting from King, working over to Rook.
+                        uint8_t obstruction = 0;
+                        for (uint8_t checkPosn = orig + castlingSquares[side + 2]; checkPosn != orig + castlingSquares[side + 0];
+                                checkPosn += castlingSquares[side + 2]) {
+                            if (ROLE(s->board[checkPosn]) != NO_ROLE) {
+                                obstruction = 1;
+                                break;
+                            }
+                        }
+                        if (!obstruction) {
+                            // The King does not pass through a square that is in check. Check by temporarily moving the King.
+                            uint8_t tempPiece = s->board[orig];
+                            s->board[orig + castlingSquares[side + 4]] = tempPiece;
+                            uint8_t danger = is_in_check(s);
+                            s->board[orig + castlingSquares[side + 4]] = 0;
+                            s->board[orig] = tempPiece;
+                            if (!danger) {
+                                // Move the King and Rook to Castle.
+                                struct Move m = {.orig = orig, .dest = orig + castlingSquares[side + 4]};
+                                struct State* succ = move_piece(s, &m);
+                                if (succ != NULL) {
+                                    succ->board[orig + castlingSquares[side + 2]] = succ->board[orig + castlingSquares[side + 0]];
+                                    succ->board[orig + castlingSquares[side + 0]] = 0;
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -423,6 +452,19 @@ static void save_game(const struct State* s) {
     close(gamef);
 }
 
+static uint64_t count_succ_recurse(struct State* s, int depth) {
+    get_legal_moves(s);
+
+    if (depth == 0)
+        return s->nSucc;
+
+    uint64_t total = 0;
+    for (uint8_t i = 0; i < s->nSucc; i++) {
+        total += count_succ_recurse(&s->succ[i], depth - 1);
+    }
+    return total;
+}
+
 int main() {
     struct State s;
     memcpy(&s, &initialState, sizeof(struct State));
@@ -448,8 +490,8 @@ int main() {
         for (uint8_t i = 0; i < s.nSucc; i++) {
             char alge[6];
             move_to_algebra(&s.succ[i].lastMove, alge);
-            printf("%s", alge);
-            printf("     ");
+            printf("%-5s", alge);
+            printf("    ");
             if (((i + 1) % 6) == 0) {
                 printf("\n");
             }
@@ -458,15 +500,12 @@ int main() {
         uint8_t cmdValid = 0;
         char buf[80];
         bzero(buf, 80);
-        printf("\nPlease enter a move, or type a time in seconds to search > ");
+        printf("\n\nPlease enter a move, or type a time in seconds to search > ");
         fflush(stdout);
-        fgets (buf, 80, stdin);
+        char* e = fgets(buf, 80, stdin);
+        if (e == NULL) break; // Error or end of input
         size_t z = strnlen(buf, 80);
-        if (z == 0) break; // End of input
         buf[z - 1] = 0; // Strip trailing newline
-
-        // Manual game save
-        
 
         // Makes a move
         // Check that the move is legal, the execute it
@@ -486,8 +525,20 @@ int main() {
             }
         }
 
+        // Manual game save
+        
+
         // Load state
         // Remember to clear references to successor states
+
+        // For debugging: Get search tree size
+        int depth;
+        int nparam = sscanf(buf, "perft %d", &depth);
+        if (nparam == 1) {
+            // Add one for current state
+            printf("Number of successors (recursive): %ld\n", count_succ_recurse(&s, depth - 1));
+            cmdValid = 1;
+        }
 
         // Fork process and perform MCTS
 
