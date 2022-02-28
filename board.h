@@ -77,13 +77,22 @@ struct State {
     // Current ply (half-move), starting at zero.
     // Even means white to move, Odd means black to move.
     uint8_t ply;
+
+    // Progress of successor state generation.
+    // First we generate everything, except castles.
+    // We then generate Castles separately, as they require is_in_check() to be recursively called.
+    // Finally, we remove the moves that would cause the King to be in Check.
+    uint8_t castlesExpanded, checksRemoved;
+    // Whether the player to move is in check.
+    // Combined with nSucc = 0 means either stalemate (0) or checkmate (1)
+    // Only valid when castlesExpanded is true and is_in_check() is called.
+    uint8_t check;
     
     // Previous and next states
     struct Move lastMove;
     const struct State* last;
     struct State* succ; // Dynamic array
     uint8_t cSucc, nSucc; // Array capacity and size
-    uint8_t movesExpanded, checksRemoved;
 
     // For MCTS: Number of times each side won
     uint64_t winsB, winsW;

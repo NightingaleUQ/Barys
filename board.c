@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <err.h>
+#include <time.h>
 #include "board.h"
 
 // Enumeration of roles
@@ -199,7 +200,7 @@ static struct State* move_piece(struct State* s, struct Move* m) {
         suc->succ = NULL;
         suc->cSucc = 0;
         suc->nSucc = 0;
-        suc->movesExpanded = 0;
+        suc->castlesExpanded = 0;
         suc->checksRemoved = 0;
 
         return suc;
@@ -243,19 +244,15 @@ static void clean_up_successors(struct State* s, const struct State* dontfree) {
         s->succ = NULL;
         s->cSucc = 0;
         s->nSucc = 0;
-        s->movesExpanded = 0;
+        s->castlesExpanded = 0;
         s->checksRemoved = 0;
     }
 }
 
-static void get_moves(struct State* s, uint8_t recurse) {
-    if (s->movesExpanded) {
-        return;
-    } else {
-        // Clear successors and search again later
-        clean_up_successors(s, NULL);
-    }
+static void get_moves(struct State* s, uint8_t expandCastles) {
     struct State* succ;
+    uint8_t firstCall = (s->nSucc == 0); // First call of this function for this state.
+
     for (int8_t r = 0; r < 8; r++)
     for (int8_t f = 0; f < 8; f++) {
         uint8_t orig = to_0x88(r, f);
@@ -264,32 +261,95 @@ static void get_moves(struct State* s, uint8_t recurse) {
         if (!piece) continue;
         if ((BLACK_TO_MOVE(s) && IS_WHITE(piece)) || (WHITE_TO_MOVE(s) && IS_BLACK(piece))) continue;
 
-        // ROOK
-        if (ROLE(piece) == ROOK) {
-            for (int8_t dirn = 0; dirn <= 3; dirn++) {
-                slide_piece(s, orig, slideDirns[dirn], 0);
+        if (firstCall) {
+            // ROOK
+            if (ROLE(piece) == ROOK) {
+                for (int8_t dirn = 0; dirn <= 3; dirn++) {
+                    slide_piece(s, orig, slideDirns[dirn], 0);
+                }
+            }
+            // BISHOP
+            if (ROLE(piece) == BISHOP) {
+                for (int8_t dirn = 4; dirn <= 7; dirn++) {
+                    slide_piece(s, orig, slideDirns[dirn], 0);
+                }
+            }
+            // QUEEN
+            if (ROLE(piece) == QUEEN) {
+                for (int8_t dirn = 0; dirn <= 7; dirn++) {
+                    slide_piece(s, orig, slideDirns[dirn], 0);
+                }
+            }
+            // KING
+            if (ROLE(piece) == KING) {
+                for (int8_t dirn = 0; dirn <= 7; dirn++) {
+                    slide_piece(s, orig, slideDirns[dirn], 1);
+                }
+            }
+            // KNIGHT
+            if (ROLE(piece) == KNIGHT) {
+                for (int8_t dirn = 0; dirn < 8; dirn++) {
+                    uint8_t dest = orig + knightDirns[dirn];
+                    struct Move m = {.orig = orig, .dest = dest};
+                    move_piece(s, &m);
+                }
+            }
+            // PAWN
+            if (ROLE(piece) == PAWN) {
+                // Clear the two-step flag from the last move
+                if ((BLACK_TO_MOVE(s) && IS_BLACK(piece)) || (WHITE_TO_MOVE(s) && IS_WHITE(piece))) {
+                    s->board[orig] &= ~PAWN_TWO_STEP;
+                }
+
+                struct Move m;
+                m.orig = orig;
+                const int8_t* pawnDirns = BLACK_TO_MOVE(s) ? pawnDirnsBlack : pawnDirnsWhite;
+
+                // Square in front is clear: move forward one or two ranks.
+                m.dest = orig + pawnDirns[0];
+                if (IS_VACANT(s->board[m.dest])) {
+                    succ = move_piece(s, &m);
+                    check_promotion(succ, &m);
+
+                    // Two-step
+                    m.dest = orig + pawnDirns[1];
+                    if (IS_VACANT(s->board[m.dest]))
+                    if ((BLACK_TO_MOVE(s) && r == 6) || (WHITE_TO_MOVE(s) && r == 1)) {
+                        succ = move_piece(s, &m);
+                        if (succ != NULL) {
+                            // Record two-step
+                            succ->board[m.dest] |= PAWN_TWO_STEP;
+                            check_promotion(succ, &m);
+                        }
+                    }
+                }
+
+                for (uint8_t i = 2; i <= 3; i++) {
+                    // Capture: Square along diagonal contains a piece of opposite colour.
+                    m.dest = orig + pawnDirns[i];
+                    uint8_t tgt = s->board[m.dest];
+                    if ((BLACK_TO_MOVE(s) && IS_WHITE(tgt)) || (WHITE_TO_MOVE(s) && IS_BLACK(tgt))) {
+                        succ = move_piece(s, &m);
+                        check_promotion(succ, &m);
+                    }
+
+                    // En passant: Check rank and pieces beside and clear destination.
+                    // m.dest is the same value used for normal capture above.
+                    uint8_t adjacent = s->board[orig + pawnDirns[i + 2]];
+                    if ((BLACK_TO_MOVE(s) && r == 3 && IS_WHITE(adjacent)) || (WHITE_TO_MOVE(s) && r == 4 && IS_BLACK(adjacent)))
+                    if (IS_VACANT(tgt) && ROLE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent)) {
+                        succ = move_piece(s, &m);
+                        // Additionally, remove en passant-ed piece
+                        if (succ != NULL)
+                            succ->board[orig + pawnDirns[i + 2]] = 0;
+                    }
+                }
             }
         }
-        // BISHOP
-        if (ROLE(piece) == BISHOP) {
-            for (int8_t dirn = 4; dirn <= 7; dirn++) {
-                slide_piece(s, orig, slideDirns[dirn], 0);
-            }
-        }
-        // QUEEN
-        if (ROLE(piece) == QUEEN) {
-            for (int8_t dirn = 0; dirn <= 7; dirn++) {
-                slide_piece(s, orig, slideDirns[dirn], 0);
-            }
-        }
-        // KING
-        if (ROLE(piece) == KING) {
-            for (int8_t dirn = 0; dirn <= 7; dirn++) {
-                slide_piece(s, orig, slideDirns[dirn], 1);
-            }
-            // Castling
-            // Ensure King has not moved and not in check, then check each side
-            if (recurse) {
+        if (expandCastles && !s->castlesExpanded) {
+            // CASTLING
+            if (ROLE(piece) == KING) {
+                // Ensure King has not moved and not in check, then check each side
                 if(!IS_PIECE_MOVED(piece) && !is_in_check(s))
                 for (uint8_t side = 0; side < 2; side++) { // 0: Queenside, 1: Kingside
                     uint8_t cornerPiece = s->board[orig + castlingSquares[side + 0]];
@@ -324,74 +384,10 @@ static void get_moves(struct State* s, uint8_t recurse) {
                         }
                     }
                 }
-            } else {
-                // Not expanding castling as we should not recursively call this function via is_in_check().
-                // This will be set to zero at the end of the function.
-                s->movesExpanded = 1;
-            }
-        }
-        // KNIGHT
-        if (ROLE(piece) == KNIGHT) {
-            for (int8_t dirn = 0; dirn < 8; dirn++) {
-                uint8_t dest = orig + knightDirns[dirn];
-                struct Move m = {.orig = orig, .dest = dest};
-                move_piece(s, &m);
-            }
-        }
-        // PAWN
-        if (ROLE(piece) == PAWN) {
-            // Clear the two-step flag from the last move
-            if ((BLACK_TO_MOVE(s) && IS_BLACK(piece)) || (WHITE_TO_MOVE(s) && IS_WHITE(piece))) {
-                s->board[orig] &= ~PAWN_TWO_STEP;
-            }
-
-            struct Move m;
-            m.orig = orig;
-            const int8_t* pawnDirns = BLACK_TO_MOVE(s) ? pawnDirnsBlack : pawnDirnsWhite;
-
-            // Square in front is clear: move forward one or two ranks.
-            m.dest = orig + pawnDirns[0];
-            if (IS_VACANT(s->board[m.dest])) {
-                succ = move_piece(s, &m);
-                check_promotion(succ, &m);
-
-                // Two-step
-                m.dest = orig + pawnDirns[1];
-                if (IS_VACANT(s->board[m.dest]))
-                if ((BLACK_TO_MOVE(s) && r == 6) || (WHITE_TO_MOVE(s) && r == 1)) {
-                    succ = move_piece(s, &m);
-                    if (succ != NULL) {
-                        // Record two-step
-                        succ->board[m.dest] |= PAWN_TWO_STEP;
-                        check_promotion(succ, &m);
-                    }
-                }
-            }
-
-            for (uint8_t i = 2; i <= 3; i++) {
-                // Capture: Square along diagonal contains a piece of opposite colour.
-                m.dest = orig + pawnDirns[i];
-                uint8_t tgt = s->board[m.dest];
-                if ((BLACK_TO_MOVE(s) && IS_WHITE(tgt)) || (WHITE_TO_MOVE(s) && IS_BLACK(tgt))) {
-                    succ = move_piece(s, &m);
-                    check_promotion(succ, &m);
-                }
-
-                // En passant: Check rank and pieces beside and clear destination.
-                // m.dest is the same value used for normal capture above.
-                uint8_t adjacent = s->board[orig + pawnDirns[i + 2]];
-                if ((BLACK_TO_MOVE(s) && r == 3 && IS_WHITE(adjacent)) || (WHITE_TO_MOVE(s) && r == 4 && IS_BLACK(adjacent)))
-                if (IS_VACANT(tgt) && ROLE(adjacent) == PAWN && IS_PAWN_TWO_STEP(adjacent)) {
-                    succ = move_piece(s, &m);
-                    // Additionally, remove en passant-ed piece
-                    if (succ != NULL)
-                        succ->board[orig + pawnDirns[i + 2]] = 0;
-                }
+                s->castlesExpanded = 1;
             }
         }
     }
-    // Flip value of this variable.
-    s->movesExpanded = 1 - s->movesExpanded;
 }
 
 static uint8_t king_captured(const struct State* s) {
@@ -428,7 +424,7 @@ static uint8_t is_in_check(const struct State* s) {
     su.succ = NULL; // Clear successor states
     su.cSucc = 0;
     su.nSucc = 0;
-    su.movesExpanded = 0;
+    su.castlesExpanded = 0;
     su.checksRemoved = 0;
     su.ply++;
 
@@ -552,8 +548,6 @@ int main() {
 
         // Fork process and perform MCTS
 
-        if (!cmdValid)
-            printf("Invalid command, try again.");
 #ifdef DEBUG
         // Load debug state
         if (strncasecmp(buf, "load perft2", 80) == 0) {
@@ -566,11 +560,16 @@ int main() {
         int depth;
         int nparam = sscanf(buf, "perft %d", &depth);
         if (nparam == 1) {
-            // Add one for current state
+            time_t start = time(NULL);
             printf("Number of successors (recursive): %ld\n", count_succ_recurse(&s, depth - 1));
+            time_t finish = time(NULL);
+            printf("Time taken: %ld seconds\n", finish - start);
             cmdValid = 1;
         }
 #endif // DEBUG
+
+        if (!cmdValid)
+            printf("Invalid command, try again.");
 
         printf("\n");
     }
