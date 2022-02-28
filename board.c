@@ -25,17 +25,19 @@ static const int8_t pawnDirnsWhite[6] = {UP, UP+UP, UP_LEFT, UP_RIGHT, LEFT, RIG
 // CASTLING: Relative Rook positons: 0-1, Rook targets / Direction of King movement: 2-3, King targets: 4-5
 // In each pair, the Queenside is listed first.
 static const int8_t castlingSquares[6] = {4*LEFT, 3*RIGHT, LEFT, RIGHT, 2*LEFT, 2*RIGHT};
+// PROMOTION: Promotable roles
+static const int8_t promotableRoles[4] = {BISHOP, KNIGHT, ROOK, QUEEN};
 
 static const struct State initialState = {
     .board = {
-        WHITE|ROOK, WHITE|KNIGHT, WHITE|BISHOP, WHITE|QUEEN, WHITE|KING, WHITE|BISHOP, WHITE|KNIGHT, WHITE|ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
-        WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,     0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,     0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,     0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,     0, 0, 0, 0, 0, 0, 0, 0,
-        BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN,  0, 0, 0, 0, 0, 0, 0, 0,
-        BLACK|ROOK, BLACK|KNIGHT, BLACK|BISHOP, BLACK|QUEEN, BLACK|KING, BLACK|BISHOP, BLACK|KNIGHT, BLACK|ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
+        WHITE|ROOK, WHITE|KNIGHT, WHITE|BISHOP, WHITE|QUEEN, WHITE|KING, WHITE|BISHOP, WHITE|KNIGHT, WHITE|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
+        WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN,     0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|ROOK, BLACK|KNIGHT, BLACK|BISHOP, BLACK|QUEEN, BLACK|KING, BLACK|BISHOP, BLACK|KNIGHT, BLACK|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
     }
 };
 
@@ -54,6 +56,83 @@ static const struct State perft2 = {
         BLACK|BISHOP, BLACK|KNIGHT, 0, 0, BLACK|PAWN, BLACK|KNIGHT, BLACK|PAWN, 0,    0, 0, 0, 0, 0, 0, 0, 0,
         BLACK|PAWN, 0, BLACK|PAWN, BLACK|PAWN, BLACK|QUEEN, BLACK|PAWN, BLACK|BISHOP, 0,    0, 0, 0, 0, 0, 0, 0, 0,
         BLACK|ROOK, 0, 0, 0, BLACK|KING, 0, 0, BLACK|ROOK,     0, 0, 0, 0, 0, 0, 0, 0,
+    }
+};
+
+static const struct State perft3 = {
+    .board = {
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, WHITE|PAWN, 0, WHITE|PAWN, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, WHITE|ROOK, 0, 0, 0, BLACK|PAWN, 0, BLACK|KING|PIECE_MOVED,    0, 0, 0, 0, 0, 0, 0, 0,
+        WHITE|KING|PIECE_MOVED, WHITE|PAWN, 0, 0, 0, 0, 0, BLACK|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, BLACK|PAWN, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, BLACK|PAWN, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+    }
+};
+
+static const struct State perft5 = {
+    .board = {
+        WHITE|ROOK, WHITE|KNIGHT, WHITE|BISHOP, WHITE|QUEEN, WHITE|KING, 0, 0, WHITE|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
+        WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, 0, WHITE|KNIGHT, BLACK|KNIGHT, WHITE|PAWN, WHITE|PAWN,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, WHITE|BISHOP, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, BLACK|PAWN, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|PAWN, BLACK|PAWN, 0, WHITE|PAWN, BLACK|BISHOP, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN,     0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|ROOK, BLACK|KNIGHT, BLACK|BISHOP, BLACK|QUEEN, 0, BLACK|KING|PIECE_MOVED, 0, BLACK|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
+    }
+};
+
+static const struct State promo1 = {
+    .board = {
+        WHITE|KING, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, WHITE|PAWN, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|KING, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+    }
+};
+
+static const struct State promo2 = {
+    .board = {
+        WHITE|KING, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, WHITE|PAWN, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|KING, 0, 0, 0, BLACK|ROOK, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+    }
+};
+
+static const struct State promo3 = {
+    .board = {
+        WHITE|KING, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, WHITE|PAWN, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|KING, 0, 0, BLACK|ROOK, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+    }
+};
+static const struct State promo4 = {
+    .board = {
+        WHITE|KING, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, BLACK|PAWN, WHITE|PAWN, BLACK|PAWN, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|KING, 0, 0, 0, 0, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
     }
 };
 #endif // DEBUG
@@ -78,6 +157,10 @@ static void move_to_algebra(const struct Move* m, char algebra[6]) {
         i += 2;
         from_0x88_to_coord(m->dest, algebra + i);
         i += 2;
+        if (role == 'p' && m->promoRole) {
+            algebra[i] = roleSyms[m->promoRole];
+            i++;
+        }
         algebra[i] = 0;
     }
 }
@@ -222,14 +305,24 @@ static void slide_piece(struct State* s, uint8_t orig, int8_t dirn, uint8_t isKi
 }
 
 // Checks a state for a pawn that is due to be promoted.
-static void check_promotion(struct State* s, const struct Move *m) {
-    if (s == NULL) return;
+// m is already populated with the origin and destination squares.
+// If eligible, it will be copied for each role and returned in result.
+static void move_pawn_and_check_promotion(struct State* s, struct Move *m) {
     uint8_t destRank, destFile;
     from_0x88(m->dest, &destRank, &destFile);
+    m->promoRole = 0;
     if ((BLACK_TO_MOVE(s) && destRank == 0) || (WHITE_TO_MOVE(s) && destRank == 7)) {
-        // Promote this state to Queen TODO Other promotions
-        s->board[m->dest] &= ROLE(0xFF);
-        s->board[m->dest] |= QUEEN;
+        // This pawn can be promoted!
+        // There should be a successor state for each role.
+        for (uint8_t i = 0; i < 4; i++) {
+            m->promoRole = promotableRoles[i];
+            struct State* succ = move_piece(s, m);
+            succ->board[m->dest] &= 0x07;
+            succ->board[m->dest] |= promotableRoles[i];
+        }
+    } else {
+        m->promoRole = 0;
+        move_piece(s, m);
     }
 }
 
@@ -307,20 +400,15 @@ static void get_moves(struct State* s, uint8_t expandCastles) {
 
                 // Square in front is clear: move forward one or two ranks.
                 m.dest = orig + pawnDirns[0];
-                if (IS_VACANT(s->board[m.dest])) {
-                    succ = move_piece(s, &m);
-                    check_promotion(succ, &m);
+                if (is_on_board(m.dest) && IS_VACANT(s->board[m.dest])) {
+                    move_pawn_and_check_promotion(s, &m);
 
                     // Two-step
                     m.dest = orig + pawnDirns[1];
-                    if (IS_VACANT(s->board[m.dest]))
+                    if (is_on_board(m.dest) && IS_VACANT(s->board[m.dest]))
                     if ((BLACK_TO_MOVE(s) && r == 6) || (WHITE_TO_MOVE(s) && r == 1)) {
                         succ = move_piece(s, &m);
-                        if (succ != NULL) {
-                            // Record two-step
-                            succ->board[m.dest] |= PAWN_TWO_STEP;
-                            check_promotion(succ, &m);
-                        }
+                        succ->board[m.dest] |= PAWN_TWO_STEP; // For en passant
                     }
                 }
 
@@ -329,8 +417,7 @@ static void get_moves(struct State* s, uint8_t expandCastles) {
                     m.dest = orig + pawnDirns[i];
                     uint8_t tgt = s->board[m.dest];
                     if ((BLACK_TO_MOVE(s) && IS_WHITE(tgt)) || (WHITE_TO_MOVE(s) && IS_BLACK(tgt))) {
-                        succ = move_piece(s, &m);
-                        check_promotion(succ, &m);
+                        move_pawn_and_check_promotion(s, &m);
                     }
 
                     // En passant: Check rank and pieces beside and clear destination.
@@ -448,23 +535,46 @@ static void remove_check(struct State* s) {
 void get_legal_moves(struct State* s) {
     get_moves(s, 1);
     remove_check(s);
+    if (is_in_check(s))
+        s->check = 1;
 }
 
-static void save_game(const struct State* s) {
-    char gamefn[80];
+static void save_game(const struct State* s, const char* gamefn) {
     int gamef;
 
-    // TODO
-    // Remember to clear references to successor states
-
-    mkdir("history", 0777);
-    snprintf(gamefn, 80, "history/move%d.game", s->ply);
     gamef = open(gamefn, O_CREAT | O_WRONLY, 0666);
     if (gamef < 0)
-        warn("open(): Error saving board");
+        warn("open(): Error saving game");
     if (write(gamef, s, sizeof(struct State)) < 0)
-        warn("write(): Error saving board");
+        warn("write(): Error saving game");
     close(gamef);
+}
+
+static void load_game(struct State* s, const char* gamefn) {
+    int gamef;
+
+    gamef = open(gamefn, O_RDONLY, 0666);
+    if (gamef < 0)
+        warn("open(): Error loading game");
+    if (read(gamef, s, sizeof(struct State)) < 0)
+        warn("read(): Error loading game");
+    close(gamef);
+
+    // Clear references to successor states
+    s->castlesExpanded = 0;
+    s->checksRemoved = 0;
+    s->check = 0;
+    s->last = NULL;
+    s->succ = NULL;
+    s->cSucc = 0;
+    s->nSucc = 0;
+}
+
+static void autosave_game(const struct State* s) {
+    char gamefn[80];
+    mkdir("history", 0777);
+    snprintf(gamefn, 80, "history/move%d.game", s->ply);
+    save_game(s, gamefn);
 }
 
 #ifdef DEBUG
@@ -493,7 +603,7 @@ int main() {
 
         // Stalemate? Checkmate?
         if (s.nSucc == 0) {
-            if (is_in_check(&s))
+            if (s.check)
                 printf("CHECKMATE\n");
             else
                 printf("STALEMATE\n");
@@ -501,7 +611,7 @@ int main() {
         }
 
         // Check?
-        if (is_in_check(&s))
+        if (s.check)
             printf("CHECK\n");
         
         // Print legal moves
@@ -537,22 +647,39 @@ int main() {
                 clean_up_successors(&s, &s.succ[i]);
                 memcpy(&s, &succ, sizeof(struct State));
 
-                save_game(&s);
+                autosave_game(&s);
                 cmdValid = 1;
                 break;
             }
         }
 
+        // TODO
         // Manual game save
         // Manual game load
 
-        // Fork process and perform MCTS
+        // Perform MCTS
 
 #ifdef DEBUG
         // Load debug state
-        if (strncasecmp(buf, "load perft2", 80) == 0) {
+        const struct State* ds = NULL;
+        if (strncasecmp(buf, "load perft2", 80) == 0)
+            ds = &perft2;
+        else if (strncasecmp(buf, "load perft3", 80) == 0)
+            ds = &perft3;
+        else if (strncasecmp(buf, "load perft5", 80) == 0)
+            ds = &perft5;
+        else if (strncasecmp(buf, "load promo1", 80) == 0)
+            ds = &promo1;
+        else if (strncasecmp(buf, "load promo2", 80) == 0)
+            ds = &promo2;
+        else if (strncasecmp(buf, "load promo3", 80) == 0)
+            ds = &promo3;
+        else if (strncasecmp(buf, "load promo4", 80) == 0)
+            ds = &promo4;
+
+        if (ds) {
             clean_up_successors(&s, NULL);
-            memcpy(&s, &perft2, sizeof(struct State));
+            memcpy(&s, ds, sizeof(struct State));
             cmdValid = 1;
         }
 

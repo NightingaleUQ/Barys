@@ -32,7 +32,7 @@
 #define BLACK (0x80)
 #define WHITE (0x00)
 #define IS_BLACK(x) ((!IS_VACANT((x)) && ((x) & BLACK)))
-#define IS_WHITE(x) ((!IS_VACANT((x)) && (!IS_BLACK((x)))))
+#define IS_WHITE(x) ((!IS_VACANT((x)) && !((x) & BLACK)))
 
 // ===========================================================================
 // 0x88 Coordinate system
@@ -69,6 +69,7 @@ struct Move {
     uint8_t role; // Piece that was moved, only bottom three bits for the role.
     uint8_t valid; // Either a piece was captured or the position is in bounds.
     uint8_t pieceCaptured;
+    uint8_t promoRole; // Pawn promotion: What did the player choose? (role only)
 };
 
 struct State {

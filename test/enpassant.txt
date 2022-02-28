@@ -1,5 +1,5 @@
-pe2e4
-pe7e6
-pe4e5
-pd7d5
-pe5d6
+e2e4
+e7e6
+e4e5
+d7d5
+e5d6
