@@ -43,7 +43,7 @@ static const struct State initialState = {
 
 #ifdef DEBUG
 // ===========================================================================
-// Perft tests
+// Performance tests (perft)
 // https://www.chessprogramming.org/Perft_Results
 // ===========================================================================
 static const struct State perft2 = {
@@ -317,7 +317,7 @@ static void move_pawn_and_check_promotion(struct State* s, struct Move *m) {
         for (uint8_t i = 0; i < 4; i++) {
             m->promoRole = promotableRoles[i];
             struct State* succ = move_piece(s, m);
-            succ->board[m->dest] &= 0x07;
+            succ->board[m->dest] &= ~0x07;
             succ->board[m->dest] |= promotableRoles[i];
         }
     } else {
@@ -578,7 +578,7 @@ static void autosave_game(const struct State* s) {
 }
 
 #ifdef DEBUG
-static uint64_t count_succ_recurse(struct State* s, int depth) {
+static uint64_t count_succ_recurse(struct State* s, int depth, uint8_t root) {
     get_legal_moves(s);
 
     if (depth == 0)
@@ -586,7 +586,13 @@ static uint64_t count_succ_recurse(struct State* s, int depth) {
 
     uint64_t total = 0;
     for (uint8_t i = 0; i < s->nSucc; i++) {
-        total += count_succ_recurse(&s->succ[i], depth - 1);
+        uint64_t nSucc = count_succ_recurse(&s->succ[i], depth - 1, 0);
+        if (root) {
+            char move[6];
+            move_to_algebra(&s->succ[i].lastMove, move);
+            printf("%s: %ld\n", move, nSucc);
+        }
+        total += nSucc;
         clean_up_successors(&s->succ[i], NULL); // Free memory as we go
     }
     return total;
@@ -688,7 +694,7 @@ int main() {
         int nparam = sscanf(buf, "perft %d", &depth);
         if (nparam == 1) {
             time_t start = time(NULL);
-            printf("Number of successors (recursive): %ld\n", count_succ_recurse(&s, depth - 1));
+            printf("Number of successors (recursive): %ld\n", count_succ_recurse(&s, depth - 1, 1));
             time_t finish = time(NULL);
             printf("Time taken: %ld seconds\n", finish - start);
             cmdValid = 1;
