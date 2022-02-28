@@ -35,12 +35,24 @@ static const struct State initialState = {
         0, 0, 0, 0, 0, 0, 0, 0,     0, 0, 0, 0, 0, 0, 0, 0,
         BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN, BLACK|PAWN,  0, 0, 0, 0, 0, 0, 0, 0,
         BLACK|ROOK, BLACK|KNIGHT, BLACK|BISHOP, BLACK|QUEEN, BLACK|KING, BLACK|BISHOP, BLACK|KNIGHT, BLACK|ROOK, 0, 0, 0, 0, 0, 0, 0, 0,
-    },
-    .ply = 0,
-    .last = NULL,
-    .succ = NULL,
-    .cSucc = 0,
-    .nSucc = 0
+    }
+};
+
+// ===========================================================================
+// Perft tests
+// https://www.chessprogramming.org/Perft_Results
+// ===========================================================================
+static const struct State perft2 = {
+    .board = {
+        WHITE|ROOK, 0, 0, 0, WHITE|KING, 0, 0, WHITE|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
+        WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|BISHOP, WHITE|BISHOP, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, WHITE|KNIGHT, 0, 0, WHITE|QUEEN, 0, BLACK|PAWN,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, BLACK|PAWN, 0, 0, WHITE|PAWN, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, WHITE|PAWN, WHITE|KNIGHT, 0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|BISHOP, BLACK|KNIGHT, 0, 0, BLACK|PAWN, BLACK|KNIGHT, BLACK|PAWN, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|PAWN, 0, BLACK|PAWN, BLACK|PAWN, BLACK|QUEEN, BLACK|PAWN, BLACK|BISHOP, 0,    0, 0, 0, 0, 0, 0, 0, 0,
+        BLACK|ROOK, 0, 0, 0, BLACK|KING, 0, 0, BLACK|ROOK,     0, 0, 0, 0, 0, 0, 0, 0,
+    }
 };
 
 // ===========================================================================
@@ -103,7 +115,7 @@ void print_state(const struct State* s) {
             printf(" %c ", sym);
             printf("\033[39m");
         }
-        printf("\033[40m");
+        printf("\033[49m");
         printf("\n");
     }
     printf("\n");
@@ -139,14 +151,14 @@ uint8_t from_0x88_to_coord(uint8_t pos, char coord[2]) {
     return 1;
 }
 
-// Allocates memory for a successor state and pre-populates some fields.
-static struct State* add_result(struct State* s, struct Move* m) {
+// Allocates memory for a successor state
+static struct State* add_result(struct State* s) {
     if (s->succ == NULL) {
-        s->succ = malloc(48 * sizeof(struct State));
         s->cSucc = 48;
+        s->succ = malloc(s->cSucc * sizeof(struct State));
     } else if (s->nSucc == s->cSucc) {
         s->cSucc += 16;
-        s->succ = realloc(s->succ, s->cSucc);
+        s->succ = realloc(s->succ, s->cSucc * sizeof(struct State));
     }
 
     // Copy state
@@ -165,9 +177,9 @@ static struct State* move_piece(struct State* s, struct Move* m) {
         return NULL;
     }
     uint8_t tgt = s->board[m->dest];
-    if (IS_VACANT(tgt) || ((BLACK_TO_MOVE(s) && IS_WHITE(tgt)) || (WHITE_TO_MOVE(s) && IS_BLACK(tgt)))) {
+    if (IS_VACANT(tgt) || (BLACK_TO_MOVE(s) && IS_WHITE(tgt)) || (WHITE_TO_MOVE(s) && IS_BLACK(tgt))) {
         // Get struct for new state.
-        struct State* suc = add_result(s, m);
+        struct State* suc = add_result(s);
 
         // Move piece to either a vacant square or capture.
         // Also record whether a piece has been moved before (for castling)
@@ -245,8 +257,9 @@ static void get_moves(struct State* s, uint8_t recurse) {
     for (int8_t r = 0; r < 8; r++)
     for (int8_t f = 0; f < 8; f++) {
         uint8_t orig = to_0x88(r, f);
-        // CHECK COLOUR
+        // CHECK colour, square not empty
         uint8_t piece = s->board[orig];
+        if (!piece) continue;
         if ((BLACK_TO_MOVE(s) && IS_WHITE(piece)) || (WHITE_TO_MOVE(s) && IS_BLACK(piece))) continue;
 
         // ROOK
@@ -277,7 +290,7 @@ static void get_moves(struct State* s, uint8_t recurse) {
             if (recurse) {
                 if(!IS_PIECE_MOVED(piece) && !is_in_check(s))
                 for (uint8_t side = 0; side < 2; side++) { // 0: Queenside, 1: Kingside
-                    uint8_t cornerPiece = s->board[orig + castlingSquares[0]];
+                    uint8_t cornerPiece = s->board[orig + castlingSquares[side + 0]];
                     if ((BLACK_TO_MOVE(s) && IS_BLACK(cornerPiece)) || (WHITE_TO_MOVE(s) && IS_WHITE(cornerPiece)))
                     if ((ROLE(cornerPiece) == ROOK) && !IS_PIECE_MOVED(cornerPiece)) {
                         // There are no pieces in between. Check squares starting from King, working over to Rook.
@@ -292,9 +305,10 @@ static void get_moves(struct State* s, uint8_t recurse) {
                         if (!obstruction) {
                             // The King does not pass through a square that is in check. Check by temporarily moving the King.
                             uint8_t tempPiece = s->board[orig];
-                            s->board[orig + castlingSquares[side + 4]] = tempPiece;
+                            s->board[orig + castlingSquares[side + 2]] = tempPiece;
+                            s->board[orig] = 0;
                             uint8_t danger = is_in_check(s);
-                            s->board[orig + castlingSquares[side + 4]] = 0;
+                            s->board[orig + castlingSquares[side + 2]] = 0;
                             s->board[orig] = tempPiece;
                             if (!danger) {
                                 // Move the King and Rook to Castle.
@@ -316,7 +330,7 @@ static void get_moves(struct State* s, uint8_t recurse) {
         }
         // KNIGHT
         if (ROLE(piece) == KNIGHT) {
-            for (int8_t dirn = 0; dirn <= 7; dirn++) {
+            for (int8_t dirn = 0; dirn < 8; dirn++) {
                 uint8_t dest = orig + knightDirns[dirn];
                 struct Move m = {.orig = orig, .dest = dest};
                 move_piece(s, &m);
@@ -442,6 +456,9 @@ static void save_game(const struct State* s) {
     char gamefn[80];
     int gamef;
 
+    // TODO
+    // Remember to clear references to successor states
+
     mkdir("history", 0777);
     snprintf(gamefn, 80, "history/move%d.game", s->ply);
     gamef = open(gamefn, O_CREAT | O_WRONLY, 0666);
@@ -461,6 +478,7 @@ static uint64_t count_succ_recurse(struct State* s, int depth) {
     uint64_t total = 0;
     for (uint8_t i = 0; i < s->nSucc; i++) {
         total += count_succ_recurse(&s->succ[i], depth - 1);
+        clean_up_successors(&s->succ[i], NULL); // Free memory as we go
     }
     return total;
 }
@@ -527,9 +545,13 @@ int main() {
 
         // Manual game save
         
-
         // Load state
-        // Remember to clear references to successor states
+        if (strncasecmp(buf, "load perft2", 80) == 0) {
+            clean_up_successors(&s, NULL);
+            memcpy(&s, &perft2, sizeof(struct State));
+            cmdValid = 1;
+        }
+            
 
         // For debugging: Get search tree size
         int depth;
