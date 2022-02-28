@@ -282,6 +282,10 @@ static struct State* move_piece(struct State* s, struct Move* m) {
         suc->nSucc = 0;
         suc->castlesExpanded = 0;
         suc->checksRemoved = 0;
+        
+        suc->winsB = 0;
+        suc->winsW = 0;
+        suc->draws = 0;
 
         return suc;
     }
@@ -339,7 +343,7 @@ void clean_up_successors(struct State* s, const struct State* dontfree) {
 }
 
 static void get_moves(struct State* s, uint8_t expandCastles) {
-    struct State* succ;
+    struct State* succ = NULL;
     uint8_t firstCall = (s->nSucc == 0); // First call of this function for this state.
 
     for (int8_t r = 0; r < 8; r++)

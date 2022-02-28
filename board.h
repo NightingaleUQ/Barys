@@ -92,7 +92,7 @@ struct State {
     
     // Previous and next states
     struct Move lastMove;
-    const struct State* last;
+    struct State* last;
     struct State* succ; // Dynamic array
     uint8_t cSucc, nSucc; // Array capacity and size
 
@@ -102,6 +102,8 @@ struct State {
 
 #define BLACK_TO_MOVE(s) ((s)->ply % 2)
 #define WHITE_TO_MOVE(s) (!BLACK_TO_MOVE((s)))
+
+#define GAMES_PLAYED(s) ((s)->winsB + (s)->winsW + (s)->draws)
 
 void print_move(const struct Move* m);
 void print_state(const struct State* s);

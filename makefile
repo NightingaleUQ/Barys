@@ -2,7 +2,7 @@ CFLAGS = -Wall -Wpedantic -O3 -mmmx -msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.
 .PHONY: debug clean
 
 boris: boris.o board.o
-	$(CC) $(CFLAGS) -o boris $^
+	$(CC) $(CFLAGS) -o boris $^ -lm
 
 boris.o: boris.c
 board.o: board.c board.h
