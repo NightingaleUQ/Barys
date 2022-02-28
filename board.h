@@ -70,6 +70,7 @@ struct Move {
     uint8_t valid; // Either a piece was captured or the position is in bounds.
     uint8_t pieceCaptured;
     uint8_t promoRole; // Pawn promotion: What did the player choose? (role only)
+    char algebra[6]; // Algebraic representation
 };
 
 struct State {
@@ -96,7 +97,7 @@ struct State {
     uint8_t cSucc, nSucc; // Array capacity and size
 
     // For MCTS: Number of times each side won
-    uint64_t winsB, winsW;
+    uint64_t winsB, winsW, draws;
 };
 
 #define BLACK_TO_MOVE(s) ((s)->ply % 2)
@@ -105,11 +106,28 @@ struct State {
 void print_move(const struct Move* m);
 void print_state(const struct State* s);
 
+// Initial game state
+const struct State initialState;
+
 // ===========================================================================
 // Legal moves
 // ===========================================================================
 // Populates s->succ with successor states as a result of legal moves.
 // Turn off recursion when querying for check.
 void get_legal_moves(struct State* s);
+// Recursively cleans up successor states, ignoring the state dontfree (if not NULL)
+void clean_up_successors(struct State* s, const struct State* dontfree);
+
+// ===========================================================================
+// Saving and Loading
+// ===========================================================================
+void save_game(const struct State* s, const char* gamefn);
+void autosave_game(const struct State* s);
+
+void load_game(struct State* s, const char* gamefn);
+#ifdef DEBUG
+const struct State* load_debug_state(const char* buf);
+#endif // DEBUG
+
 
 #endif // BOARD_H

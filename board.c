@@ -1,13 +1,15 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <unistd.h>
+
+#include <err.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <err.h>
 #include <time.h>
+
 #include "board.h"
 
 // Enumeration of roles
@@ -28,7 +30,7 @@ static const int8_t castlingSquares[6] = {4*LEFT, 3*RIGHT, LEFT, RIGHT, 2*LEFT, 
 // PROMOTION: Promotable roles
 static const int8_t promotableRoles[4] = {BISHOP, KNIGHT, ROOK, QUEEN};
 
-static const struct State initialState = {
+const struct State initialState = {
     .board = {
         WHITE|ROOK, WHITE|KNIGHT, WHITE|BISHOP, WHITE|QUEEN, WHITE|KING, WHITE|BISHOP, WHITE|KNIGHT, WHITE|ROOK,    0, 0, 0, 0, 0, 0, 0, 0,
         WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN, WHITE|PAWN,    0, 0, 0, 0, 0, 0, 0, 0,
@@ -142,37 +144,32 @@ static const struct State promo4 = {
 // ===========================================================================
 static uint8_t is_in_check(const struct State* s);
 
-// Returns result in algebra as five characters + \0
-static void move_to_algebra(const struct Move* m, char algebra[6]) {
-    if (m == NULL || !(m->role)) {
-        snprintf(algebra, 6, "none");
-    } else {
-        uint8_t i = 0;
-        char role = roleSyms[m->role];
-        if (role != 'p') {
-            algebra[i] = role;
-            i++;
-        }
-        from_0x88_to_coord(m->orig, algebra + i);
-        i += 2;
-        from_0x88_to_coord(m->dest, algebra + i);
-        i += 2;
-        if (role == 'p' && m->promoRole) {
-            algebra[i] = roleSyms[m->promoRole];
-            i++;
-        }
-        algebra[i] = 0;
+// Populates m.algebra using its other fields.
+static void move_to_algebra(struct Move* m) {
+    uint8_t i = 0;
+    char role = roleSyms[m->role];
+    if (role != 'p') {
+        m->algebra[i] = role;
+        i++;
     }
+    from_0x88_to_coord(m->orig, m->algebra + i);
+    i += 2;
+    from_0x88_to_coord(m->dest, m->algebra + i);
+    i += 2;
+    if (role == 'p' && m->promoRole) {
+        m->algebra[i] = roleSyms[m->promoRole];
+        i++;
+    }
+    m->algebra[i] = 0;
 }
 
 void print_state(const struct State* s) {
-    char alge[6];
-    move_to_algebra(&s->lastMove, alge);
-    printf("%s", alge);
+    if (s->lastMove.valid)
+        printf("%s, ", s->lastMove.algebra);
     if (BLACK_TO_MOVE(s))
-        printf(", black to move\n");
+        printf("black to move\n");
     else
-        printf(", white to move\n");
+        printf("white to move\n");
 
     printf("   ");
     for (char f = 'a'; f <= 'h'; f++) {
@@ -326,8 +323,7 @@ static void move_pawn_and_check_promotion(struct State* s, struct Move *m) {
     }
 }
 
-// Recursively cleans up successor states, ignoring the state dontfree (if not NULL)
-static void clean_up_successors(struct State* s, const struct State* dontfree) {
+void clean_up_successors(struct State* s, const struct State* dontfree) {
     if (s->succ) {
         for (uint8_t i = 0; i < s->nSucc; i++) {
             if (&s->succ[i] != dontfree)
@@ -537,9 +533,12 @@ void get_legal_moves(struct State* s) {
     remove_check(s);
     if (is_in_check(s))
         s->check = 1;
+    for (uint8_t i = 0; i < s->nSucc; i++) {
+        move_to_algebra(&s->succ[i].lastMove);
+    }
 }
 
-static void save_game(const struct State* s, const char* gamefn) {
+void save_game(const struct State* s, const char* gamefn) {
     int gamef;
 
     gamef = open(gamefn, O_CREAT | O_WRONLY, 0666);
@@ -550,7 +549,7 @@ static void save_game(const struct State* s, const char* gamefn) {
     close(gamef);
 }
 
-static void load_game(struct State* s, const char* gamefn) {
+void load_game(struct State* s, const char* gamefn) {
     int gamef;
 
     gamef = open(gamefn, O_RDONLY, 0666);
@@ -570,7 +569,7 @@ static void load_game(struct State* s, const char* gamefn) {
     s->nSucc = 0;
 }
 
-static void autosave_game(const struct State* s) {
+void autosave_game(const struct State* s) {
     char gamefn[80];
     mkdir("history", 0777);
     snprintf(gamefn, 80, "history/move%d.game", s->ply);
@@ -578,96 +577,9 @@ static void autosave_game(const struct State* s) {
 }
 
 #ifdef DEBUG
-static uint64_t count_succ_recurse(struct State* s, int depth, uint8_t root) {
-    get_legal_moves(s);
-
-    if (depth == 0)
-        return s->nSucc;
-
-    uint64_t total = 0;
-    for (uint8_t i = 0; i < s->nSucc; i++) {
-        uint64_t nSucc = count_succ_recurse(&s->succ[i], depth - 1, 0);
-        if (root) {
-            char move[6];
-            move_to_algebra(&s->succ[i].lastMove, move);
-            printf("%s: %ld\n", move, nSucc);
-        }
-        total += nSucc;
-        clean_up_successors(&s->succ[i], NULL); // Free memory as we go
-    }
-    return total;
-}
-#endif // DEBUG
-
-int main() {
-    struct State s;
-    memcpy(&s, &initialState, sizeof(struct State));
-    // Prompt loop
-    for (;;) {
-        print_state(&s);
-        get_legal_moves(&s);
-
-        // Stalemate? Checkmate?
-        if (s.nSucc == 0) {
-            if (s.check)
-                printf("CHECKMATE\n");
-            else
-                printf("STALEMATE\n");
-            break;
-        }
-
-        // Check?
-        if (s.check)
-            printf("CHECK\n");
-        
-        // Print legal moves
-        for (uint8_t i = 0; i < s.nSucc; i++) {
-            char alge[6];
-            move_to_algebra(&s.succ[i].lastMove, alge);
-            printf("%-5s", alge);
-            printf("    ");
-            if (((i + 1) % 6) == 0) {
-                printf("\n");
-            }
-        }
-
-        uint8_t cmdValid = 0;
-        char buf[80];
-        bzero(buf, 80);
-        printf("\n\nPlease enter a move, or type a time in seconds to search > ");
-        fflush(stdout);
-        char* e = fgets(buf, 80, stdin);
-        if (e == NULL) break; // Error or end of input
-        size_t z = strnlen(buf, 80);
-        buf[z - 1] = 0; // Strip trailing newline
-
-        // Makes a move
-        // Check that the move is legal, the execute it
-        for (uint8_t i = 0; i < s.nSucc; i++) {
-            char alge[6];
-            move_to_algebra(&s.succ[i].lastMove, alge);
-            if (strncasecmp(buf, alge, 6) == 0) {
-                // Overwrite current state and save it.
-                struct State succ;
-                memcpy(&succ, &s.succ[i], sizeof(struct State));
-                clean_up_successors(&s, &s.succ[i]);
-                memcpy(&s, &succ, sizeof(struct State));
-
-                autosave_game(&s);
-                cmdValid = 1;
-                break;
-            }
-        }
-
-        // TODO
-        // Manual game save
-        // Manual game load
-
-        // Perform MCTS
-
-#ifdef DEBUG
-        // Load debug state
+const struct State* load_debug_state(const char* buf) {
         const struct State* ds = NULL;
+
         if (strncasecmp(buf, "load perft2", 80) == 0)
             ds = &perft2;
         else if (strncasecmp(buf, "load perft3", 80) == 0)
@@ -683,30 +595,6 @@ int main() {
         else if (strncasecmp(buf, "load promo4", 80) == 0)
             ds = &promo4;
 
-        if (ds) {
-            clean_up_successors(&s, NULL);
-            memcpy(&s, ds, sizeof(struct State));
-            cmdValid = 1;
-        }
-
-        // Get state tree size to specified depth
-        int depth;
-        int nparam = sscanf(buf, "perft %d", &depth);
-        if (nparam == 1) {
-            time_t start = time(NULL);
-            printf("Number of successors (recursive): %ld\n", count_succ_recurse(&s, depth - 1, 1));
-            time_t finish = time(NULL);
-            printf("Time taken: %ld seconds\n", finish - start);
-            cmdValid = 1;
-        }
-#endif // DEBUG
-
-        if (!cmdValid)
-            printf("Invalid command, try again.");
-
-        printf("\n");
-    }
-    clean_up_successors(&s, NULL);
-
-    return 0;
+        return ds;
 }
+#endif // DEBUG
