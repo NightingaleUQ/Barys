@@ -6,7 +6,7 @@ build: optimise
 optimise: CFLAGS += -O3 -mmmx -msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -msse4 -mavx -mavx2
 optimise: engine
 
-debug: CFLAGS += -g
+debug: CFLAGS += -g -DDEBUG
 debug: engine
 
 engine:

@@ -38,6 +38,7 @@ static const struct State initialState = {
     }
 };
 
+#ifdef DEBUG
 // ===========================================================================
 // Perft tests
 // https://www.chessprogramming.org/Perft_Results
@@ -54,6 +55,7 @@ static const struct State perft2 = {
         BLACK|ROOK, 0, 0, 0, BLACK|KING, 0, 0, BLACK|ROOK,     0, 0, 0, 0, 0, 0, 0, 0,
     }
 };
+#endif // DEBUG
 
 // ===========================================================================
 // Static function declarations
@@ -469,6 +471,7 @@ static void save_game(const struct State* s) {
     close(gamef);
 }
 
+#ifdef DEBUG
 static uint64_t count_succ_recurse(struct State* s, int depth) {
     get_legal_moves(s);
 
@@ -482,6 +485,7 @@ static uint64_t count_succ_recurse(struct State* s, int depth) {
     }
     return total;
 }
+#endif // DEBUG
 
 int main() {
     struct State s;
@@ -544,16 +548,21 @@ int main() {
         }
 
         // Manual game save
-        
-        // Load state
+        // Manual game load
+
+        // Fork process and perform MCTS
+
+        if (!cmdValid)
+            printf("Invalid command, try again.");
+#ifdef DEBUG
+        // Load debug state
         if (strncasecmp(buf, "load perft2", 80) == 0) {
             clean_up_successors(&s, NULL);
             memcpy(&s, &perft2, sizeof(struct State));
             cmdValid = 1;
         }
-            
 
-        // For debugging: Get search tree size
+        // Get state tree size to specified depth
         int depth;
         int nparam = sscanf(buf, "perft %d", &depth);
         if (nparam == 1) {
@@ -561,11 +570,7 @@ int main() {
             printf("Number of successors (recursive): %ld\n", count_succ_recurse(&s, depth - 1));
             cmdValid = 1;
         }
-
-        // Fork process and perform MCTS
-
-        if (!cmdValid)
-            printf("Invalid command, try again.");
+#endif // DEBUG
 
         printf("\n");
     }
