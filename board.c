@@ -201,7 +201,6 @@ void print_state(const struct State* s) {
         printf("\033[49m");
         printf("\n");
     }
-    printf("\n");
 }
 
 uint8_t is_on_board(uint8_t pos) {
@@ -273,6 +272,7 @@ static struct State* move_piece(struct State* s, struct Move* m) {
         m->role = ROLE(s->board[m->orig]);
         m->pieceCaptured = !IS_VACANT(s->board[m->dest]);
         m->valid = 1;
+        m->promoRole = 0;
         memcpy(&suc->lastMove, m, sizeof(struct Move));
 
         suc->ply++;
@@ -343,6 +343,10 @@ void clean_up_successors(struct State* s, const struct State* dontfree) {
 }
 
 static void get_moves(struct State* s, uint8_t expandCastles) {
+    // No need to do this again
+    if (s->castlesExpanded)
+        return;
+
     struct State* succ = NULL;
     uint8_t firstCall = (s->nSucc == 0); // First call of this function for this state.
 

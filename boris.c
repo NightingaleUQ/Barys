@@ -30,26 +30,19 @@ static uint64_t count_succ_recurse(struct State* s, int depth, uint8_t root) {
 // Returns a descendant state that has yet to be played out.
 // If all successors of a state have been played out, recurse.
 struct State* selection(struct State* s) {
-    // Base case: Not simulated yet.
-    if (GAMES_PLAYED(s) == 0)
-        return s;
-
     // Ensure all successors have been simulated
-    if (s->succ == NULL)
-        get_legal_moves(s);
+    get_legal_moves(s);
     for (uint8_t i = 0; i < s->nSucc; i++) {
         if (GAMES_PLAYED(&s->succ[i]) == 0)
             return &s->succ[i];
     }
 
     // Pick a successor to recurse.
+    // Whatever move has the best advantage for the person to play.
     struct State* selected = NULL;
     double umax = -INFINITY;
-    uint64_t n = 0; // Total moves across all successors
+    uint64_t n = GAMES_PLAYED(s);
 
-    for (uint8_t i = 0; i < s->nSucc; i++) {
-        n += GAMES_PLAYED(&s->succ[i]);
-    }
     for (uint8_t i = 0; i < s->nSucc; i++) {
         int64_t wins = BLACK_TO_MOVE(&s->succ[i]) ? s->succ[i].winsB : s->succ[i].winsW;
         int64_t losses = BLACK_TO_MOVE(&s->succ[i]) ? s->succ[i].winsW : s->succ[i].winsB;
@@ -62,6 +55,10 @@ struct State* selection(struct State* s) {
             umax = ucb;
         }
     }
+#ifdef DEBUG
+    if (selected == NULL)
+        fprintf(stderr, "selection(): No node selected\n");
+#endif // DEBUG
     return selection(selected);
 }
 
@@ -88,6 +85,7 @@ void playout(struct State* init) {
             finished = 1;
             break;
         } else {
+            // FIXME use ranrom_r()
             struct State* succ = &s->succ[random() % s->nSucc];
             s = succ;
         }
@@ -108,12 +106,17 @@ static void mcts_iter(struct State* s) {
     int nthreads = 1; // Ask user TODO
     struct State* instance = malloc(nthreads * sizeof(struct State));
     for (int t = 0; t < nthreads; t++) {
+        // Hopefully this will prevent us from trashing memory
         memcpy(&instance[t], selected, sizeof(struct State));
+        instance[t].last = NULL;
         instance[t].succ = NULL;
         instance[t].cSucc = 0;
         instance[t].nSucc = 0;
-        for (int i = 0; i < 5; i++)
-            playout(&instance[t]);
+        instance[t].winsB = 0;
+        instance[t].winsW = 0;
+        instance[t].draws = 0;
+        // for (int i = 0; i < 5; i++)
+        playout(&instance[t]);
     }
     // Collect results
     for (int t = 0; t < nthreads; t++) {
@@ -128,32 +131,22 @@ static void mcts_iter(struct State* s) {
     // BACKPROPROGATION
     struct State* cur = selected;
     for (;;) {
+        cur = cur->last;
+        cur->winsB += selected->winsB;
+        cur->winsW += selected->winsW;
+        cur->draws += selected->draws;
         if (cur == s)
             break;
-        cur->last->winsB += selected->winsB;
-        cur->last->winsW += selected->winsW;
-        cur->last->draws += selected->draws;
-        cur = cur->last;
     }
 }
 
 static void mcts(struct State* s, int time) {
     // TODO Time limit
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < time; i++) {
         mcts_iter(s);
-        printf("i = %d\n", i);
     }
 
-    printf("SEARCH RESULTS after %ld simulated games:\n", GAMES_PLAYED(s));
-    for (uint8_t i = 0; i < s->nSucc; i++) {
-        int64_t wins = BLACK_TO_MOVE(&s->succ[i]) ? s->succ[i].winsB : s->succ[i].winsW;
-        int64_t losses = BLACK_TO_MOVE(&s->succ[i]) ? s->succ[i].winsW : s->succ[i].winsB;
-        int64_t advantage = wins - losses;
-        printf("%-5s: %.3f (%ld %ld %ld)   ", s->succ[i].lastMove.algebra,
-                (double)advantage / (double)GAMES_PLAYED(&s->succ[i]), wins, losses, s->succ[i].draws);
-        if ((i + 1)% 5 == 0)
-            printf("\n");
-    }
+    printf("Finished simulating %ld games.\n", GAMES_PLAYED(s));
 }
 
 int main() {
@@ -179,14 +172,25 @@ int main() {
         if (s.check)
             printf("CHECK\n");
         
-        // Print legal moves
+        // Print legal moves with advantages for current player
+        struct State* best = NULL;
+        double bestAdv = -INFINITY;
         for (uint8_t i = 0; i < s.nSucc; i++) {
-            printf("%-5s", s.succ[i].lastMove.algebra);
-            printf("    ");
-            if (((i + 1) % 6) == 0) {
+            if (i % 5 == 0)
                 printf("\n");
+            int64_t wins = BLACK_TO_MOVE(&s.succ[i]) ? s.succ[i].winsB : s.succ[i].winsW;
+            int64_t losses = BLACK_TO_MOVE(&s.succ[i]) ? s.succ[i].winsW : s.succ[i].winsB;
+            double advantage = (double)(wins - losses) / (double)GAMES_PLAYED(&s.succ[i]);
+            char moveAdv[80];
+            snprintf(moveAdv, 80, "%-5s: %-6.3f (%ld %ld %ld)     ", s.succ[i].lastMove.algebra,
+                    advantage , wins, losses, s.succ[i].draws);
+            printf("%-30s", moveAdv);
+            if (best == NULL || (advantage > bestAdv)) {
+                best = &s.succ[i];
+                bestAdv = advantage;
             }
         }
+        printf("\nMove with best advantage: %s\n", best->lastMove.algebra);
 
         uint8_t cmdValid = 0;
         char buf[80];
@@ -207,6 +211,10 @@ int main() {
                 memcpy(&succ, &s.succ[i], sizeof(struct State));
                 clean_up_successors(&s, &s.succ[i]);
                 memcpy(&s, &succ, sizeof(struct State));
+
+                // FIXME Clearing successors at every move should not be necessary.
+                // But something is trashing successor state representations.
+                clean_up_successors(&s, NULL);
 
                 autosave_game(&s);
                 cmdValid = 1;

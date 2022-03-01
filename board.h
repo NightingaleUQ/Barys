@@ -105,7 +105,6 @@ struct State {
 
 #define GAMES_PLAYED(s) ((s)->winsB + (s)->winsW + (s)->draws)
 
-void print_move(const struct Move* m);
 void print_state(const struct State* s);
 
 // Initial game state
