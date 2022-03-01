@@ -14,8 +14,6 @@
 
 // Enumeration of roles
 static const char roleSyms[7] = {' ', 'p', 'R', 'N', 'B', 'Q', 'K'};
-// Value of roles
-static const uint16_t roleVals[7] = {0, 1, 5, 3, 3, 9, 99};
 
 // ===========================================================================
 // Piece movement patterns
@@ -163,20 +161,6 @@ static void move_to_algebra(struct Move* m) {
         i++;
     }
     m->algebra[i] = 0;
-}
-
-int16_t black_advantage(const struct State* s) {
-    uint16_t blackAdvantage = 0;
-    for (uint8_t i = 0; i < 128; i++) {
-        if (s->board[i] != 0) {
-            int8_t value = roleVals[ROLE(s->board[i])];
-            if (IS_WHITE(s->board[i])) {
-                value *= -1;
-            }
-            blackAdvantage += value;
-        }
-    }
-    return blackAdvantage;
 }
 
 void print_state(const struct State* s) {

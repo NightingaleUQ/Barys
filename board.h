@@ -110,9 +110,6 @@ const struct State initialState;
 
 void print_state(const struct State* s);
 
-// Calculate the difference in piece worth.
-int16_t black_advantage(const struct State* s);
-
 // ===========================================================================
 // Legal moves
 // ===========================================================================
