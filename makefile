@@ -4,7 +4,7 @@ CFLAGS = -Wall -Wpedantic -mmmx -msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -m
 all: optimise
 
 boris: boris.o board.o
-	$(CC) $(CFLAGS) -o boris $^ -lm
+	$(CC) $(CFLAGS) -o boris $^ -lm -lpthread
 
 boris.o: boris.c
 board.o: board.c board.h

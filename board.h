@@ -105,10 +105,13 @@ struct State {
 
 #define GAMES_PLAYED(s) ((s)->winsB + (s)->winsW + (s)->draws)
 
-void print_state(const struct State* s);
-
 // Initial game state
 const struct State initialState;
+
+void print_state(const struct State* s);
+
+// Calculate the difference in piece worth.
+int16_t black_advantage(const struct State* s);
 
 // ===========================================================================
 // Legal moves

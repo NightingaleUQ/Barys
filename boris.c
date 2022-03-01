@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <time.h>
+#include <pthread.h>
 
 #include "board.h"
 
@@ -29,7 +30,7 @@ static uint64_t count_succ_recurse(struct State* s, int depth, uint8_t root) {
 
 // Returns a descendant state that has yet to be played out.
 // If all successors of a state have been played out, recurse.
-struct State* selection(struct State* s) {
+static struct State* selection(struct State* s) {
     // Ensure all successors have been simulated
     get_legal_moves(s);
     for (uint8_t i = 0; i < s->nSucc; i++) {
@@ -47,9 +48,12 @@ struct State* selection(struct State* s) {
         int64_t wins = BLACK_TO_MOVE(&s->succ[i]) ? s->succ[i].winsB : s->succ[i].winsW;
         int64_t losses = BLACK_TO_MOVE(&s->succ[i]) ? s->succ[i].winsW : s->succ[i].winsB;
         double exploit = (double)(wins - losses) / (double)GAMES_PLAYED(&s->succ[i]);
+        double pieceAdvantage = black_advantage(s) * 0.1; // Small influence
+        if (WHITE_TO_MOVE(s))
+            pieceAdvantage *= -1;
         double c = 0.5;
         double explore = c * (sqrt(log(n) / GAMES_PLAYED(&s->succ[i])));
-        double ucb = exploit + explore;
+        double ucb = pieceAdvantage + exploit + explore;
         if (ucb > umax) {
             selected = &s->succ[i];
             umax = ucb;
@@ -63,7 +67,10 @@ struct State* selection(struct State* s) {
 }
 
 // Make random moves until someone wins.
-void playout(struct State* init) {
+static void* playout(void* args) {
+    // Unpack arguments
+    struct State* init = (struct State*)args;
+
     struct State* s = init;
     uint8_t finished = 0;
 
@@ -85,16 +92,18 @@ void playout(struct State* init) {
             finished = 1;
             break;
         } else {
-            // FIXME use ranrom_r()
+            // FIXME use random_r()
             struct State* succ = &s->succ[random() % s->nSucc];
             s = succ;
         }
     }
     // The game didn't finish within the move limit.
-    if (!finished)
+    if (!finished) {
         init->draws++;
+    }
 
     clean_up_successors(init, NULL);
+    return NULL;
 }
 
 static void mcts_iter(struct State* s) {
@@ -102,9 +111,10 @@ static void mcts_iter(struct State* s) {
     struct State* selected = selection(s);
 
     // SIMULATION
-    // TODO Multithreaded playout, with time limit
-    int nthreads = 1; // Ask user TODO
+    // Multithreaded playout, with time limit
+    int nthreads = 12; // Ask user TODO
     struct State* instance = malloc(nthreads * sizeof(struct State));
+    pthread_t* threads = malloc(nthreads * sizeof(pthread_t));
     for (int t = 0; t < nthreads; t++) {
         // Hopefully this will prevent us from trashing memory
         memcpy(&instance[t], selected, sizeof(struct State));
@@ -115,8 +125,10 @@ static void mcts_iter(struct State* s) {
         instance[t].winsB = 0;
         instance[t].winsW = 0;
         instance[t].draws = 0;
-        // for (int i = 0; i < 5; i++)
-        playout(&instance[t]);
+        pthread_create(&threads[t], NULL, playout, &instance[t]);
+    }
+    for (int t = 0; t < nthreads; t++) {
+        pthread_join(threads[t], NULL);
     }
     // Collect results
     for (int t = 0; t < nthreads; t++) {
@@ -126,6 +138,7 @@ static void mcts_iter(struct State* s) {
         // printf("BWD: %ld %ld %ld\n", instance[i].winsB, instance[i].winsW, instance[i].draws);
     }
     free(instance);
+    free(threads);
     // printf("BWD: %ld %ld %ld\n", selected->winsB, selected->winsW, selected->draws);
 
     // BACKPROPROGATION
@@ -140,22 +153,29 @@ static void mcts_iter(struct State* s) {
     }
 }
 
-static void mcts(struct State* s, int time) {
-    // TODO Time limit
-    for (int i = 0; i < time; i++) {
-        mcts_iter(s);
-    }
+struct MCTS_args {
+    struct State* s;
+    int* searching;
+};
 
-    printf("Finished simulating %ld games.\n", GAMES_PLAYED(s));
+static void* mcts(void* args) {
+    struct State* s = ((struct MCTS_args*)args)->s;
+    int* searching = ((struct MCTS_args*)args)->searching;
+    
+    while (*searching)
+        mcts_iter(s);
+
+    return NULL;
 }
 
 int main() {
     struct State s;
     memcpy(&s, &initialState, sizeof(struct State));
+
+    int searchRunning = 0;
+
     // Prompt loop
     for (;;) {
-        int nparam;
-
         print_state(&s);
         get_legal_moves(&s);
 
@@ -176,15 +196,15 @@ int main() {
         struct State* best = NULL;
         double bestAdv = -INFINITY;
         for (uint8_t i = 0; i < s.nSucc; i++) {
-            if (i % 5 == 0)
+            if (i % 4 == 0)
                 printf("\n");
             int64_t wins = BLACK_TO_MOVE(&s.succ[i]) ? s.succ[i].winsB : s.succ[i].winsW;
             int64_t losses = BLACK_TO_MOVE(&s.succ[i]) ? s.succ[i].winsW : s.succ[i].winsB;
             double advantage = (double)(wins - losses) / (double)GAMES_PLAYED(&s.succ[i]);
             char moveAdv[80];
-            snprintf(moveAdv, 80, "%-5s: %-6.3f (%ld %ld %ld)     ", s.succ[i].lastMove.algebra,
-                    advantage , wins, losses, s.succ[i].draws);
-            printf("%-30s", moveAdv);
+            snprintf(moveAdv, 80, "%-5s: %-6.3f (%ld %ld %ld)", s.succ[i].lastMove.algebra,
+                    advantage, wins, losses, s.succ[i].draws);
+            printf("%-35s", moveAdv);
             if (best == NULL || (advantage > bestAdv)) {
                 best = &s.succ[i];
                 bestAdv = advantage;
@@ -192,47 +212,73 @@ int main() {
         }
         printf("\nMove with best advantage: %s\n", best->lastMove.algebra);
 
+        // PROMPT user
         uint8_t cmdValid = 0;
         char buf[80];
         bzero(buf, 80);
-        printf("\n\nPlease enter a move, or type a time in seconds to search > ");
+        printf("\n\nPlease enter a move, or type ");
+        if (!searchRunning) {
+            printf("\"search\"");
+        } else {
+            printf("\"stop\"");
+        }
+        printf(" > ");
+        
         fflush(stdout);
         char* e = fgets(buf, 80, stdin);
         if (e == NULL) break; // Error or end of input
         size_t z = strnlen(buf, 80);
         buf[z - 1] = 0; // Strip trailing newline
 
+        // Perform MCTS
+        pthread_t mctsThread;
+        if (strncasecmp(buf, "search", 80) == 0) {
+            if (!searchRunning) {
+                searchRunning = 1;
+                struct MCTS_args args = {.s = &s, .searching = &searchRunning};
+                pthread_create(&mctsThread, NULL, mcts, (void*)&args);
+                cmdValid = 1;
+            } else {
+                printf("The search is already running.\n");
+            }
+        } else if (strncasecmp(buf, "stop", 80) == 0) {
+            if (searchRunning) {
+                searchRunning = 0;
+                pthread_join(mctsThread, NULL);
+                printf("Finished simulating %ld games.\n", GAMES_PLAYED(&s));
+                cmdValid = 1;
+            } else {
+                printf("A search is not running.\n");
+            }
+        }
+        
         // Makes a move
         // Check that the move is legal, the execute it
         for (uint8_t i = 0; i < s.nSucc; i++) {
             if (strncasecmp(buf, s.succ[i].lastMove.algebra, 6) == 0) {
-                // Overwrite current state and save it.
-                struct State succ;
-                memcpy(&succ, &s.succ[i], sizeof(struct State));
-                clean_up_successors(&s, &s.succ[i]);
-                memcpy(&s, &succ, sizeof(struct State));
+                if (!searchRunning) {
+                    // Overwrite current state and save it.
+                    struct State succ;
+                    memcpy(&succ, &s.succ[i], sizeof(struct State));
+                    clean_up_successors(&s, &s.succ[i]);
+                    memcpy(&s, &succ, sizeof(struct State));
 
-                // FIXME Clearing successors at every move should not be necessary.
-                // But something is trashing successor state representations.
-                clean_up_successors(&s, NULL);
+                    // FIXME Clearing successors at every move should not be necessary.
+                    // But something is trashing successor state representations.
+                    clean_up_successors(&s, NULL);
 
-                autosave_game(&s);
-                cmdValid = 1;
-                break;
+                    autosave_game(&s);
+                    cmdValid = 1;
+                    break;
+                } else {
+                    printf("Please stop the search first.\n");
+                }
             }
         }
 
         // TODO
         // Manual game save
         // Manual game load
-
-        // Perform MCTS
-        int timelimit;
-        nparam = sscanf(buf, "search %d", &timelimit);
-        if (nparam == 1) {
-            mcts(&s, timelimit);
-            cmdValid = 1;
-        }
 
 #ifdef DEBUG
         // Load debug state
@@ -257,7 +303,7 @@ int main() {
 #endif // DEBUG
 
         if (!cmdValid)
-            printf("Invalid command, try again.");
+            printf("Invalid command, try again.\n");
 
         printf("\n");
     }
