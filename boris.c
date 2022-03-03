@@ -255,7 +255,7 @@ int main() {
             int64_t losses = BLACK_TO_MOVE(&s) ? s.succ[i].winsW : s.succ[i].winsB;
             double advantage = (double)(wins - losses) / (double)GAMES_PLAYED(&s.succ[i]);
             char moveAdv[80];
-            snprintf(moveAdv, 80, "%-5s: %-6.3f (%ld %ld %ld)", s.succ[i].lastMove.algebra,
+            snprintf(moveAdv, 80, "%-5s: %- 6.3f (%ld %ld %ld)", s.succ[i].lastMove.algebra,
                     advantage, wins, losses, s.succ[i].draws);
             printf("%-35s", moveAdv);
             if (best == NULL || (advantage > bestAdv)) {
@@ -368,6 +368,7 @@ int main() {
         if (err < 0) warn("write(): Cannot write in pipe to worker thread");
         pthread_join(workers[t].thr, NULL);
     }
+    free(workers);
     clean_up_successors(&s, NULL);
 
     return 0;
