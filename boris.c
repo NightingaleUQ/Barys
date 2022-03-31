@@ -263,7 +263,7 @@ int main() {
                 bestAdv = advantage;
             }
         }
-        printf("\nMove with best advantage: %s\n", best->lastMove.algebra);
+        printf("\nMove with best advantage: %s (%.3f)\n", best->lastMove.algebra, bestAdv);
 
         // PROMPT user
         uint8_t cmdValid = 0;
