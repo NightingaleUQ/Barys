@@ -16,6 +16,6 @@ debug: CFLAGS += -g -DDEBUG
 debug: boris
 
 clean:
-	rm boris
-	rm *.o
+	rm boris &
+	rm *.o &
 	rm -rf history
